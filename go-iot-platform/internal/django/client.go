@@ -1,12 +1,12 @@
 package django
 
 import (
-    "bytes"
-    "encoding/json"
-    "fmt"
-    "io"
-    "net/http"
-    "time"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
 )
 
 var (
@@ -32,6 +32,13 @@ type RefreshRequest struct {
 type Device struct {
     Serial string   `json:"serial_number"`
     Topics []string `json:"topics"`
+}
+
+type RegisterDeviceRequest struct {
+    Serial      string `json:"serial_number"`
+    Description string `json:"description"`
+    DeviceType  string `json:"device_type"`
+    ClientID    int    `json:"client"`
 }
 
 // 🔑 Login la Django
@@ -154,4 +161,25 @@ func GetDevicesForUser(username string) ([]Device, error) {
         return nil, err
     }
     return devs, nil
+}
+
+// 🆕 Înregistrare automată device
+func RegisterDevice(dev RegisterDeviceRequest) error {
+    client := &http.Client{Timeout: 5 * time.Second}
+    body, _ := json.Marshal(dev)
+    req, _ := http.NewRequest("POST", baseURL+"/devices/", bytes.NewBuffer(body))
+    req.Header.Set("Authorization", "Bearer "+accessToken)
+    req.Header.Set("Content-Type", "application/json")
+
+    resp, err := client.Do(req)
+    if err != nil {
+        return err
+    }
+    defer resp.Body.Close()
+
+    data, _ := io.ReadAll(resp.Body)
+    if resp.StatusCode != http.StatusCreated {
+        return fmt.Errorf("device register failed (%d): %s", resp.StatusCode, string(data))
+    }
+    return nil
 }

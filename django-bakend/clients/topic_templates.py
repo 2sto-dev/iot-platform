@@ -14,4 +14,11 @@ TOPIC_TEMPLATES = {
         "tele/{serial}/STATE",
         "tele/{serial}/SENSOR",
     ],
+    
+    "zigbee_sensor": [
+    "zigbee2mqtt/{serial}"
+    ],
+    "auto_detected": [
+        "{serial}"  # fallback: doar serialul brut
+    ],
 }

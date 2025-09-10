@@ -1,2 +1,4 @@
 *.mod
 *go.sum
+config
+.env

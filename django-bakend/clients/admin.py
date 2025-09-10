@@ -1,7 +1,21 @@
 from django.contrib import admin
+from django.contrib.auth.admin import UserAdmin
 from django.utils.html import format_html
 from .models import Client, Device
 from .topic_templates import TOPIC_TEMPLATES
+
+
+@admin.register(Client)
+class ClientAdmin(UserAdmin):
+    """Admin pentru utilizatori (Client)"""
+    model = Client
+    list_display = ("username", "email", "prenume", "telefon", "is_staff", "is_superuser")
+    fieldsets = UserAdmin.fieldsets + (
+        ("Informații suplimentare", {"fields": ("prenume", "telefon")}),
+    )
+    add_fieldsets = UserAdmin.add_fieldsets + (
+        ("Informații suplimentare", {"fields": ("prenume", "telefon")}),
+    )
 
 
 @admin.register(Device)
