@@ -1,0 +1,310 @@
+2025/09/10 19:59:40 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 19:59:40 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 19:59:40 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 19:59:40 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 19:59:40 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 19:59:40 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 19:59:41 main.go:195: Scris în InfluxDB (Shelly energy): 396.00
+2025/09/10 19:59:41 main.go:195: Scris în InfluxDB (Shelly returned_energy): 0.00
+2025/09/10 19:59:41 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 19:59:41 main.go:195: Scris în InfluxDB (Shelly energy): 396.00
+2025/09/10 19:59:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 19:59:51 main.go:209: Scris în InfluxDB (Shelly relay state): 1
+2025/09/10 19:59:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 19:59:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 19:59:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 19:59:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 19:59:51 main.go:195: Scris în InfluxDB (Shelly total): 539614.60
+2025/09/10 19:59:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 19:59:51 main.go:195: Scris în InfluxDB (Shelly power): 391.26
+2025/09/10 19:59:51 main.go:195: Scris în InfluxDB (Shelly reactive_power): -328.17
+2025/09/10 19:59:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 19:59:51 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 19:59:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 19:59:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 19:59:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 19:59:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 19:59:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 19:59:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 19:59:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 19:59:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 19:59:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 19:59:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 19:59:52 main.go:195: Scris în InfluxDB (Shelly voltage): 221.21
+2025/09/10 19:59:52 main.go:195: Scris în InfluxDB (Shelly power): 391.26
+2025/09/10 19:59:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 19:59:52 main.go:195: Scris în InfluxDB (Shelly total): 539614.60
+2025/09/10 19:59:52 main.go:195: Scris în InfluxDB (Shelly pf): -0.77
+2025/09/10 19:59:52 main.go:195: Scris în InfluxDB (Shelly total_returned): 186.00
+2025/09/10 19:59:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 19:59:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 19:59:52 main.go:195: Scris în InfluxDB (Shelly voltage): 221.21
+2025/09/10 19:59:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 221.21
+2025/09/10 20:00:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:21 main.go:209: Scris în InfluxDB (Shelly relay state): 1
+2025/09/10 20:00:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:00:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:00:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:00:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:00:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:21 main.go:195: Scris în InfluxDB (Shelly reactive_power): -326.89
+2025/09/10 20:00:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:21 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:00:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:21 main.go:195: Scris în InfluxDB (Shelly total): 539614.60
+2025/09/10 20:00:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:21 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 219.37
+2025/09/10 20:00:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:21 main.go:195: Scris în InfluxDB (Shelly power): 393.95
+2025/09/10 20:00:22 main.go:195: Scris în InfluxDB (Shelly total): 539614.60
+2025/09/10 20:00:22 main.go:195: Scris în InfluxDB (Shelly voltage): 219.37
+2025/09/10 20:00:22 main.go:195: Scris în InfluxDB (Shelly voltage): 219.37
+2025/09/10 20:00:22 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:00:22 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:00:22 main.go:195: Scris în InfluxDB (Shelly power): 393.95
+2025/09/10 20:00:22 main.go:195: Scris în InfluxDB (Shelly total_returned): 186.00
+2025/09/10 20:00:22 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:00:22 main.go:195: Scris în InfluxDB (Shelly pf): -0.77
+2025/09/10 20:00:22 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:00:40 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:40 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:40 main.go:195: Scris în InfluxDB (Shelly energy): 395.00
+2025/09/10 20:00:40 main.go:195: Scris în InfluxDB (Shelly energy): 395.00
+2025/09/10 20:00:40 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:40 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:40 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:40 main.go:195: Scris în InfluxDB (Shelly returned_energy): 0.00
+2025/09/10 20:00:40 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:00:40 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:00:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:51 main.go:209: Scris în InfluxDB (Shelly relay state): 1
+2025/09/10 20:00:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:00:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:00:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:00:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:00:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:51 main.go:195: Scris în InfluxDB (Shelly pf): -0.77
+2025/09/10 20:00:51 main.go:195: Scris în InfluxDB (Shelly total_returned): 186.00
+2025/09/10 20:00:51 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:00:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:51 main.go:195: Scris în InfluxDB (Shelly total): 539621.10
+2025/09/10 20:00:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:52 main.go:195: Scris în InfluxDB (Shelly voltage): 217.47
+2025/09/10 20:00:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:00:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:52 main.go:195: Scris în InfluxDB (Shelly reactive_power): -326.91
+2025/09/10 20:00:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:52 main.go:195: Scris în InfluxDB (Shelly voltage): 217.47
+2025/09/10 20:00:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:00:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:00:52 main.go:195: Scris în InfluxDB (Shelly total): 539621.10
+2025/09/10 20:00:52 main.go:195: Scris în InfluxDB (Shelly power): 390.10
+2025/09/10 20:00:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:00:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:00:52 main.go:195: Scris în InfluxDB (Shelly power): 390.10
+2025/09/10 20:00:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 217.47
+2025/09/10 20:01:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:21 main.go:209: Scris în InfluxDB (Shelly relay state): 1
+2025/09/10 20:01:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:01:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:01:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:01:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:01:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:21 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 220.2
+2025/09/10 20:01:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:21 main.go:195: Scris în InfluxDB (Shelly total_returned): 186.00
+2025/09/10 20:01:21 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:21 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:21 main.go:195: Scris în InfluxDB (Shelly reactive_power): -328.25
+2025/09/10 20:01:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:21 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:22 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:22 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:22 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:22 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:22 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:22 main.go:195: Scris în InfluxDB (Shelly power): 395.96
+2025/09/10 20:01:22 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:22 main.go:195: Scris în InfluxDB (Shelly voltage): 220.20
+2025/09/10 20:01:22 main.go:195: Scris în InfluxDB (Shelly pf): -0.77
+2025/09/10 20:01:22 main.go:195: Scris în InfluxDB (Shelly total): 539621.10
+2025/09/10 20:01:22 main.go:195: Scris în InfluxDB (Shelly voltage): 220.20
+2025/09/10 20:01:22 main.go:195: Scris în InfluxDB (Shelly total): 539621.10
+2025/09/10 20:01:22 main.go:195: Scris în InfluxDB (Shelly power): 395.96
+2025/09/10 20:01:22 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:22 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:40 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:40 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:40 main.go:195: Scris în InfluxDB (Shelly energy): 397.00
+2025/09/10 20:01:40 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:40 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:40 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:40 main.go:195: Scris în InfluxDB (Shelly energy): 397.00
+2025/09/10 20:01:40 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:40 main.go:195: Scris în InfluxDB (Shelly returned_energy): 0.00
+2025/09/10 20:01:40 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:43 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:43 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:43 main.go:195: Scris în InfluxDB (Shelly power): 419.70
+2025/09/10 20:01:43 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:01:43 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:01:43 main.go:195: Scris în InfluxDB (Shelly power): 419.70
+2025/09/10 20:01:43 main.go:195: Scris în InfluxDB (Shelly pf): -0.78
+2025/09/10 20:01:43 main.go:195: Scris în InfluxDB (Shelly reactive_power): -339.89
+2025/09/10 20:01:43 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:43 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:43 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:43 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:43 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:43 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:43 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:43 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:43 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:43 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:43 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:43 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:43 main.go:195: Scris în InfluxDB (Shelly voltage): 223.31
+2025/09/10 20:01:43 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:43 main.go:195: Scris în InfluxDB (Shelly voltage): 223.31
+2025/09/10 20:01:43 main.go:195: Scris în InfluxDB (Shelly total): 539627.70
+2025/09/10 20:01:43 main.go:195: Scris în InfluxDB (Shelly total): 539627.70
+2025/09/10 20:01:43 main.go:195: Scris în InfluxDB (Shelly total_returned): 186.00
+2025/09/10 20:01:43 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:43 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 223.31
+2025/09/10 20:01:43 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:43 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:45 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:45 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:45 main.go:195: Scris în InfluxDB (Shelly power): 391.80
+2025/09/10 20:01:45 main.go:195: Scris în InfluxDB (Shelly power): 391.80
+2025/09/10 20:01:45 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:01:45 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:45 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 222.29
+2025/09/10 20:01:45 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:45 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:45 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:45 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:45 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:45 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:45 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:45 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:45 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:45 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:45 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:45 main.go:195: Scris în InfluxDB (Shelly pf): -0.77
+2025/09/10 20:01:45 main.go:195: Scris în InfluxDB (Shelly voltage): 222.29
+2025/09/10 20:01:45 main.go:195: Scris în InfluxDB (Shelly total): 539627.70
+2025/09/10 20:01:45 main.go:195: Scris în InfluxDB (Shelly reactive_power): -328.50
+2025/09/10 20:01:45 main.go:195: Scris în InfluxDB (Shelly total_returned): 186.00
+2025/09/10 20:01:45 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:45 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:45 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:45 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:45 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:45 main.go:195: Scris în InfluxDB (Shelly voltage): 222.29
+2025/09/10 20:01:45 main.go:195: Scris în InfluxDB (Shelly total): 539627.70
+2025/09/10 20:01:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:51 main.go:209: Scris în InfluxDB (Shelly relay state): 1
+2025/09/10 20:01:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:01:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:01:51 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:01:51 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:51 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 222.87
+2025/09/10 20:01:51 main.go:195: Scris în InfluxDB (Shelly total_returned): 186.00
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:195: Scris în InfluxDB (Shelly power): 407.74
+2025/09/10 20:01:52 main.go:195: Scris în InfluxDB (Shelly reactive_power): -342.78
+2025/09/10 20:01:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:52 main.go:195: Scris în InfluxDB (Shelly voltage): 222.87
+2025/09/10 20:01:52 main.go:195: Scris în InfluxDB (Shelly total): 539627.70
+2025/09/10 20:01:52 main.go:195: Scris în InfluxDB (Shelly pf): -0.77
+2025/09/10 20:01:52 main.go:195: Scris în InfluxDB (Shelly voltage): 222.87
+2025/09/10 20:01:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:52 main.go:195: Scris în InfluxDB (Shelly power): 407.74
+2025/09/10 20:01:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:52 main.go:195: Scris în InfluxDB (Shelly total): 539627.70
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:01:52 main.go:195: Scris în InfluxDB (Shelly power): 418.04
+2025/09/10 20:01:52 main.go:195: Scris în InfluxDB (Shelly power): 418.04
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:195: Scris în InfluxDB (Shelly reactive_power): -343.81
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 222.79
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:195: Scris în InfluxDB (Shelly voltage): 222.79
+2025/09/10 20:01:52 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:52 main.go:195: Scris în InfluxDB (Shelly pf): -0.77
+2025/09/10 20:01:52 main.go:195: Scris în InfluxDB (Shelly voltage): 222.79
+2025/09/10 20:01:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:52 main.go:195: Scris în InfluxDB (Shelly total): 539627.70
+2025/09/10 20:01:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:52 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:52 main.go:195: Scris în InfluxDB (Shelly total): 539627.70
+2025/09/10 20:01:52 main.go:195: Scris în InfluxDB (Shelly total_returned): 186.00
+2025/09/10 20:01:56 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:56 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:56 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: Post "http://localhost:8000/api/devices/": dial tcp [::1]:8000: connectex: No connection could be made because the target machine actively refused it.
+2025/09/10 20:01:56 main.go:195: Scris în InfluxDB (Shelly power): 394.78
+2025/09/10 20:01:56 main.go:195: Scris în InfluxDB (Shelly power): 394.78
+2025/09/10 20:01:56 main.go:195: Scris în InfluxDB (Shelly voltage): 222.36
+2025/09/10 20:01:56 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:56 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:56 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:56 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:56 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:56 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:56 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:56 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:56 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:56 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:56 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:56 main.go:174: Eroare la înregistrarea device-ului emvd2ap14: device register failed (401): {"detail":"Given token not valid for any token type","code":"token_not_valid","messages":[{"token_class":"AccessToken","token_type":"access","message":"Token is expired"}]}
+2025/09/10 20:01:56 main.go:195: Scris în InfluxDB (Shelly pf): -0.76
+2025/09/10 20:01:56 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:56 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:56 main.go:195: Scris în InfluxDB (Shelly total): 539627.70
+2025/09/10 20:01:56 main.go:195: Scris în InfluxDB (Shelly total_returned): 186.00
+2025/09/10 20:01:56 main.go:195: Scris în InfluxDB (Shelly reactive_power): -333.36
+2025/09/10 20:01:56 main.go:195: Scris în InfluxDB (Shelly total): 539627.70
+2025/09/10 20:01:56 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:56 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:56 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 0
+2025/09/10 20:01:56 main.go:195: Scris în InfluxDB (Shelly voltage): 222.36
+2025/09/10 20:01:56 main.go:287: Scris în InfluxDB (Generic simplu emvd2ap14): 222.36
