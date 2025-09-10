@@ -14,6 +14,8 @@ class Device(models.Model):
     DEVICE_CHOICES = [
         ("shelly_em", "Shelly EM"),
         ("nous_at", "Nous AT"),
+        ("zigbee_sensor", "Zigbee Sensor"),      # 👈 nou
+        ("auto_detected", "Auto Detected"),      # 👈 fallback generic
     ]
 
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name="devices")
