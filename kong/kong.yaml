@@ -1,0 +1,77 @@
+_format_version: "3.0"
+_transform: true
+plugins:
+  - name: prometheus
+
+
+
+
+consumers:
+  - username: django-users
+
+jwt_secrets:
+  - consumer: django-users
+    algorithm: HS256
+    key: django              # trebuie să fie același cu iss din token (tokens.py)
+    secret: "123456789"      # același secret ca în Django settings.py și .env
+
+services:
+  # Django API - autentificare (login / refresh) → fără JWT
+  - name: django-auth
+    url: http://172.16.0.105:8000
+    routes:
+      - name: django-token
+        paths:
+          - /api/token
+        strip_path: false
+      - name: django-token-refresh
+        paths:
+          - /api/token/refresh
+        strip_path: false
+
+  # Django API - device-uri (JWT validat de Kong)
+  - name: django-devices
+    url: http://172.16.0.105:8000
+    routes:
+      - name: django-devices-route
+        paths:
+          - /api/devices
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              claims_to_verify:
+                - exp
+          - name: file-log
+            config:
+              path: /var/log/kong/django-device.log
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  # Go API (JWT validat de Kong)
+  - name: go-api
+    url: http://172.16.0.105:8080
+    routes:
+      - name: go-api-route
+        paths:
+          - /go
+        strip_path: false   # 👉 foarte important: taie prefixul /go
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              claims_to_verify:
+                - exp
