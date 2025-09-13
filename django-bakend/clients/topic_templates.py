@@ -1,8 +1,3 @@
-# clients/topic_templates.py
-
-# Dicționar cu template-uri de topicuri pentru fiecare tip de device.
-# {serial} va fi înlocuit cu serial_number din modelul Device.
-
 TOPIC_TEMPLATES = {
     "shelly_em": [
         "shellies/{serial}/emeter/0/energy",
@@ -14,11 +9,10 @@ TOPIC_TEMPLATES = {
         "tele/{serial}/STATE",
         "tele/{serial}/SENSOR",
     ],
-    
     "zigbee_sensor": [
-    "zigbee2mqtt/{serial}"
+        "zigbee2mqtt/{serial}"
     ],
     "auto_detected": [
-        "{serial}"  # fallback: doar serialul brut
+        "{serial}"
     ],
 }

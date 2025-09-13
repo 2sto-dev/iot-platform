@@ -3,7 +3,8 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
-from .models import Client, Device
+from django.contrib.auth import get_user_model
+from .models import Device
 from .serializers import DeviceSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView
 from .tokens import CustomTokenObtainPairSerializer
@@ -18,23 +19,26 @@ class DeviceViewSet(viewsets.ModelViewSet):
         """Superuser vede toate device-urile, user normal doar pe ale lui"""
         user = self.request.user
         if not user.is_authenticated:
-            # Dacă nu există JWT valid → returnăm listă goală, nu eroare
             return Device.objects.none()
         if user.is_superuser:
             return Device.objects.all()
         return Device.objects.filter(client=user)
 
+
 class CustomTokenObtainPairView(TokenObtainPairView):
+    """View pentru login cu user/parolă → JWT"""
     serializer_class = CustomTokenObtainPairSerializer
+
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def user_devices(request, username):
     """
-    Returnează device-urile + topicurile aferente pentru un client specificat.
+    Returnează device-urile pentru userul specificat.
     - Superuser poate vedea device-urile oricui.
-    - Un user normal vede doar propriile device-uri.
+    - User normal vede doar device-urile proprii.
     """
+    Client = get_user_model()
     user = get_object_or_404(Client, username=username)
 
     if request.user != user and not request.user.is_superuser:
@@ -43,9 +47,3 @@ def user_devices(request, username):
     devices = Device.objects.filter(client=user)
     serializer = DeviceSerializer(devices, many=True)
     return Response(serializer.data)
-
-
-
-
-
-
