@@ -17,6 +17,8 @@ import (
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
 	influxdb2api "github.com/influxdata/influxdb-client-go/v2/api"
 
+	"github.com/joho/godotenv" // pentru încărcarea .env
+
 	"go-iot-platform/internal/api"
 	"go-iot-platform/internal/django"
 	"go-iot-platform/internal/influx"
@@ -25,19 +27,26 @@ import (
 //go:embed go_meeter.log
 var initialLog string
 
+// init rulează înainte de main()
+func init() {
+	if err := godotenv.Load(); err != nil {
+		log.Println("⚠️ Nu s-a putut încărca .env, folosesc doar variabilele din sistem")
+	}
+}
+
 func main() {
-	fmt.Println("=== LOG ÎNTEGRAT ===")
+	fmt.Println("=== LOG INTEGRAT ===")
 	fmt.Println(initialLog)
 
 	// 📂 log runtime în consolă + fișier
 	if _, err := os.Stat("logs"); os.IsNotExist(err) {
-		os.Mkdir("logs", 0755)
+		_ = os.Mkdir("logs", 0755)
 	}
 	f, _ := os.OpenFile("logs/go_meeter_runtime.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	log.SetOutput(io.MultiWriter(os.Stdout, f))
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 
-	// 🔑 Login ca superuser (admin)
+	// 🔑 Login ca superuser (admin Django)
 	if err := django.Login(os.Getenv("DJANGO_SUPERUSER"), os.Getenv("DJANGO_SUPERPASS")); err != nil {
 		log.Fatalf("Eroare login Django: %v", err)
 	}
@@ -53,11 +62,20 @@ func main() {
 	// Pornire REST API Go
 	mux := http.NewServeMux()
 	api.RegisterRoutes(mux)
+
+	// fallback pentru orice request → log + 404
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("⚠️ Request necunoscut: %s %s", r.Method, r.URL.Path)
+		log.Printf("⚠️ Headers: %+v", r.Header)
+		http.NotFound(w, r)
+	})
+
 	server := &http.Server{
 		Addr:    ":8080",
-		Handler: api.EnableCORS(mux),
+		Handler: api.EnableCORS(http.StripPrefix("/go", mux)),
 	}
-	log.Println("API server rulând pe http://localhost:8080")
+
+	log.Println("✅ API Go disponibil pe http://localhost:8080/go/* prin Kong")
 	log.Fatal(server.ListenAndServe())
 }
 
@@ -70,7 +88,6 @@ func startMQTTSubscriber(writeAPI influxdb2api.WriteAPIBlocking) {
 		log.Fatal("⚠️ MQTT_BROKER nu este setat în .env")
 	}
 
-	// 🔎 Ia TOATE device-urile și topicurile direct din Django
 	devices, err := django.GetAllDevices()
 	if err != nil {
 		log.Fatalf("Eroare la preluarea device-urilor din Django: %v", err)
@@ -87,7 +104,6 @@ func startMQTTSubscriber(writeAPI influxdb2api.WriteAPIBlocking) {
 	opts.SetPassword(mqttPassword)
 
 	opts.OnConnect = func(c mqtt.Client) {
-		// 🔔 abonare la topicurile generate de Django
 		for _, topic := range mqttTopics {
 			if token := c.Subscribe(topic, 0, func(client mqtt.Client, msg mqtt.Message) {
 				go handleMessage(msg, writeAPI)
@@ -98,7 +114,6 @@ func startMQTTSubscriber(writeAPI influxdb2api.WriteAPIBlocking) {
 			}
 		}
 
-		// 🔔 abonare wildcard → pentru device-uri noi
 		if token := c.Subscribe("#", 0, func(client mqtt.Client, msg mqtt.Message) {
 			go handleMessage(msg, writeAPI)
 		}); token.Wait() && token.Error() != nil {
@@ -137,13 +152,14 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 	topic := msg.Topic()
 	payload := msg.Payload()
 
+	log.Printf("📥 MQTT Message: topic=%s payload=%s", topic, string(payload))
+
 	parts := strings.Split(topic, "/")
 	if len(parts) < 2 {
 		return
 	}
 	deviceID := parts[1]
 
-	// ✅ verifică dacă device-ul există în Django
 	devices, _ := django.GetAllDevices()
 	found := false
 	for _, d := range devices {
@@ -153,7 +169,6 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 		}
 	}
 
-	// 🔄 Înregistrare automată device necunoscut
 	if !found {
 		devType := "auto_detected"
 		if strings.HasPrefix(topic, "zigbee2mqtt/") {
@@ -168,22 +183,21 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 			Serial:      deviceID,
 			Description: fmt.Sprintf("Auto-registered from topic %s", topic),
 			DeviceType:  devType,
-			ClientID:    1, // admin
+			ClientID:    1,
 		}
 		if err := django.RegisterDevice(devReq); err != nil {
-			log.Printf("Eroare la înregistrarea device-ului %s: %v", deviceID, err)
+			log.Printf("❌ Eroare la înregistrarea device-ului %s: %v", deviceID, err)
 		} else {
-			log.Printf("Device %s înregistrat automat în Django (%s)", deviceID, devType)
+			log.Printf("✅ Device %s înregistrat automat în Django (%s)", deviceID, devType)
 		}
 	}
 
-	// --- Scriere în Influx ---
-	// Shelly EM
+	// Scriere în Influx (cu loguri pe fiecare caz)
 	if strings.Contains(topic, "/emeter/0/") {
 		valStr := string(payload)
 		var value float64
 		if _, err := fmt.Sscanf(valStr, "%f", &value); err != nil {
-			log.Printf("Eroare conversie la float pentru %s: %v", valStr, err)
+			log.Printf("❌ Eroare conversie la float pentru %s: %v", valStr, err)
 			return
 		}
 		field := parts[len(parts)-1]
@@ -191,10 +205,9 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 			map[string]string{"device": deviceID, "source": "shelly", "type": "power_meter"},
 			map[string]interface{}{strings.Title(field): value},
 			time.Now())
-		writeAPI.WritePoint(context.Background(), p)
-		log.Printf("Scris în InfluxDB (Shelly %s): %.2f", field, value)
+		_ = writeAPI.WritePoint(context.Background(), p)
+		log.Printf("📊 Scris în InfluxDB (Shelly %s): %.2f", field, value)
 
-	// Shelly relay ON/OFF
 	} else if strings.Contains(topic, "/relay/0") {
 		valStr := strings.ToLower(string(payload))
 		state := 0
@@ -205,28 +218,26 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 			map[string]string{"device": deviceID, "source": "shelly", "type": "relay"},
 			map[string]interface{}{"state": state},
 			time.Now())
-		writeAPI.WritePoint(context.Background(), p)
-		log.Printf("Scris în InfluxDB (Shelly relay state): %d", state)
+		_ = writeAPI.WritePoint(context.Background(), p)
+		log.Printf("📊 Scris în InfluxDB (Shelly relay state): %d", state)
 
-	// NousAT STATE
 	} else if strings.HasSuffix(topic, "/STATE") {
 		var state StateMessage
 		if err := json.Unmarshal(payload, &state); err != nil {
-			log.Printf("Eroare parsare STATE: %v", err)
+			log.Printf("❌ Eroare parsare STATE: %v", err)
 			return
 		}
 		p := influxdb2.NewPoint("devices",
 			map[string]string{"device": deviceID, "source": "nousat", "type": "state"},
 			map[string]interface{}{"POWER": state.POWER, "RSSI": state.RSSI},
 			time.Now())
-		writeAPI.WritePoint(context.Background(), p)
-		log.Printf("Scris în InfluxDB (NousAT STATE): %+v", state)
+		_ = writeAPI.WritePoint(context.Background(), p)
+		log.Printf("📊 Scris în InfluxDB (NousAT STATE): %+v", state)
 
-	// NousAT SENSOR
 	} else if strings.HasSuffix(topic, "/SENSOR") {
 		var sensor SensorMessage
 		if err := json.Unmarshal(payload, &sensor); err != nil {
-			log.Printf("Eroare parsare SENSOR: %v", err)
+			log.Printf("❌ Eroare parsare SENSOR: %v", err)
 			return
 		}
 		t, err := time.Parse(time.RFC3339, sensor.Time)
@@ -242,36 +253,32 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 				"Total":   sensor.ENERGY.Total,
 			},
 			t)
-		writeAPI.WritePoint(context.Background(), p)
-		log.Printf("Scris în InfluxDB (NousAT SENSOR): %+v", sensor.ENERGY)
+		_ = writeAPI.WritePoint(context.Background(), p)
+		log.Printf("📊 Scris în InfluxDB (NousAT SENSOR): %+v", sensor.ENERGY)
 
-	// Zigbee2MQTT (JSON complet)
 	} else if strings.HasPrefix(topic, "zigbee2mqtt/") {
 		var data map[string]interface{}
 		if err := json.Unmarshal(payload, &data); err != nil {
-			log.Printf("Eroare parsare Zigbee payload: %v", err)
+			log.Printf("❌ Eroare parsare Zigbee payload: %v", err)
 			return
 		}
 		p := influxdb2.NewPoint("devices",
 			map[string]string{"device": deviceID, "source": "zigbee2mqtt", "type": "sensor"},
 			data,
 			time.Now())
-		writeAPI.WritePoint(context.Background(), p)
-		log.Printf("Scris în InfluxDB (Zigbee2MQTT %s): %+v", deviceID, data)
+		_ = writeAPI.WritePoint(context.Background(), p)
+		log.Printf("📊 Scris în InfluxDB (Zigbee2MQTT %s): %+v", deviceID, data)
 
-	// Alte device-uri necunoscute (generic)
 	} else {
 		var data map[string]interface{}
 		if err := json.Unmarshal(payload, &data); err == nil {
-			// payload este JSON obiect
 			p := influxdb2.NewPoint("devices",
 				map[string]string{"device": deviceID, "source": "generic", "type": "auto_detected"},
 				data,
 				time.Now())
-			writeAPI.WritePoint(context.Background(), p)
-			log.Printf("Scris în InfluxDB (Generic JSON %s): %+v", deviceID, data)
+			_ = writeAPI.WritePoint(context.Background(), p)
+			log.Printf("📊 Scris în InfluxDB (Generic JSON %s): %+v", deviceID, data)
 		} else {
-			// payload simplu (număr/string)
 			valStr := string(payload)
 			var val interface{}
 			if f, err := strconv.ParseFloat(valStr, 64); err == nil {
@@ -283,8 +290,8 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 				map[string]string{"device": deviceID, "source": "generic", "type": "auto_detected"},
 				map[string]interface{}{"value": val},
 				time.Now())
-			writeAPI.WritePoint(context.Background(), p)
-			log.Printf("Scris în InfluxDB (Generic simplu %s): %v", deviceID, val)
+			_ = writeAPI.WritePoint(context.Background(), p)
+			log.Printf("📊 Scris în InfluxDB (Generic simplu %s): %v", deviceID, val)
 		}
 	}
 }

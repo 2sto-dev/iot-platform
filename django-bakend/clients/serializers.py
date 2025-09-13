@@ -11,12 +11,12 @@ class DeviceSerializer(serializers.ModelSerializer):
             "id",
             "serial_number",
             "description",
-            "device_type",   # 👈 inclus explicit
+            "device_type",
             "client",
-            "topics",        # 👈 generat din engine (topic_templates.py)
+            "topics",
         ]
 
     def get_topics(self, obj):
-        """Generează topicurile pentru device din template-uri."""
         template_list = TOPIC_TEMPLATES.get(obj.device_type, [])
         return [t.format(serial=obj.serial_number) for t in template_list]
+

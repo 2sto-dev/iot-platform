@@ -4,7 +4,8 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
-
-        # 🔑 Adăugăm și username în payload-ul JWT
+        # includem username-ul în payload (pentru debug sau aplicații)
         token["username"] = user.username
+        # adăugăm un issuer fix, pe care îl va folosi Kong pentru validare
+        token["iss"] = "django"
         return token

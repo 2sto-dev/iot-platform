@@ -8,6 +8,6 @@ router = DefaultRouter()
 router.register(r'devices', DeviceViewSet, basename='device')
 
 urlpatterns = [
-    path('devices/<str:username>/', user_devices, name='user_devices'),  # 👈 prioritate aici
-    path('', include(router.urls)),                                      # apoi CRUD normal
+    path('devices/<str:username>/', user_devices, name='user_devices'),
+    path('', include(router.urls)),
 ]
