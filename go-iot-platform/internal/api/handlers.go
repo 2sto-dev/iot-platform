@@ -93,8 +93,9 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("✅ User %s are acces la device %s", username, device)
 
-	// citim valoarea din Influx
-	val, err := influx.GetFieldForDevice(device, field)
+	// citim valoarea din Influx (range opțional din query string, default -5m)
+	rangeStr := r.URL.Query().Get("range")
+	val, err := influx.GetFieldForDevice(device, field, rangeStr)
 	if err != nil {
 		log.Printf("❌ Influx error pentru %s/%s: %v", device, field, err)
 		http.Error(w, "Influx error: "+err.Error(), http.StatusInternalServerError)
