@@ -1,4 +1,29 @@
-*.mod
-*go.sum
-config
+# Secrets
 .env
+*.env.local
+
+# Go
+go-iot-platform/bin/
+go-iot-platform/logs/
+*.exe
+
+# Python / Django
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+db.sqlite3
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.log

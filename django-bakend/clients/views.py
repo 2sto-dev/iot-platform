@@ -11,16 +11,19 @@ from .tokens import CustomTokenObtainPairSerializer
 
 
 class DeviceViewSet(viewsets.ModelViewSet):
-    """CRUD complet pentru Device"""
+    """CRUD pentru Device.
+
+    - Superuser sau service account (cu perm `clients.view_device`) văd toate device-urile.
+    - Useri obișnuiți autentificați văd doar device-urile proprii.
+    """
     queryset = Device.objects.all()
     serializer_class = DeviceSerializer
 
     def get_queryset(self):
-        """Superuser vede toate device-urile, user normal doar pe ale lui"""
         user = self.request.user
         if not user.is_authenticated:
             return Device.objects.none()
-        if user.is_superuser:
+        if user.is_superuser or user.has_perm("clients.view_device"):
             return Device.objects.all()
         return Device.objects.filter(client=user)
 

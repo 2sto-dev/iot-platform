@@ -98,7 +98,7 @@ func Refresh() error {
 	// dacă refresh-ul nu mai e valid → refacem login
 	if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized {
 		fmt.Println("⚠️ Refresh invalid, refac login...")
-		return Login(os.Getenv("DJANGO_SUPERUSER"), os.Getenv("DJANGO_SUPERPASS"))
+		return Login(os.Getenv("DJANGO_SERVICE_USER"), os.Getenv("DJANGO_SERVICE_PASS"))
 	}
 
 	return fmt.Errorf("refresh failed (%d): %s", resp.StatusCode, string(data))
