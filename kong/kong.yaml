@@ -27,7 +27,7 @@ services:
           - /api/token/refresh
         strip_path: false
 
-  # Django API - device-uri (JWT validat de Kong)
+  # Django API - device-uri (JWT validat de Kong + propagare X-Tenant-* upstream)
   - name: django-devices
     url: http://172.16.0.105:8000
     routes:
@@ -41,25 +41,33 @@ services:
               key_claim_name: iss
               claims_to_verify:
                 - exp
+          # După validarea JWT, decodează payload-ul (signature-checked deja) și propagă claim-urile
+          # ca headere către upstream — Django/Go nu mai re-decodează tokenul.
+          - name: pre-function
+            config:
+              access:
+                - |
+                  local cjson = require "cjson.safe"
+                  local auth = kong.request.get_header("authorization")
+                  if not auth or auth:sub(1, 7) ~= "Bearer " then return end
+                  local token = auth:sub(8)
+                  local _, payload = token:match("([^%.]+)%.([^%.]+)%.")
+                  if not payload then return end
+                  payload = payload:gsub("-", "+"):gsub("_", "/")
+                  payload = payload .. string.rep("=", (4 - #payload % 4) % 4)
+                  local decoded = ngx.decode_base64(payload)
+                  if not decoded then return end
+                  local claims = cjson.decode(decoded)
+                  if not claims then return end
+                  if claims.tenant_id   then kong.service.request.set_header("X-Tenant-Id",   tostring(claims.tenant_id))   end
+                  if claims.tenant_slug then kong.service.request.set_header("X-Tenant-Slug", tostring(claims.tenant_slug)) end
+                  if claims.role        then kong.service.request.set_header("X-Role",        tostring(claims.role))        end
+                  if claims.username    then kong.service.request.set_header("X-Username",    tostring(claims.username))    end
           - name: file-log
             config:
               path: /var/log/kong/django-device.log
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  # Go API (JWT validat de Kong)
+  # Go API (JWT validat de Kong + propagare X-Tenant-* upstream)
   - name: go-api
     url: http://172.16.0.105:8080
     routes:
@@ -73,3 +81,23 @@ services:
               key_claim_name: iss
               claims_to_verify:
                 - exp
+          - name: pre-function
+            config:
+              access:
+                - |
+                  local cjson = require "cjson.safe"
+                  local auth = kong.request.get_header("authorization")
+                  if not auth or auth:sub(1, 7) ~= "Bearer " then return end
+                  local token = auth:sub(8)
+                  local _, payload = token:match("([^%.]+)%.([^%.]+)%.")
+                  if not payload then return end
+                  payload = payload:gsub("-", "+"):gsub("_", "/")
+                  payload = payload .. string.rep("=", (4 - #payload % 4) % 4)
+                  local decoded = ngx.decode_base64(payload)
+                  if not decoded then return end
+                  local claims = cjson.decode(decoded)
+                  if not claims then return end
+                  if claims.tenant_id   then kong.service.request.set_header("X-Tenant-Id",   tostring(claims.tenant_id))   end
+                  if claims.tenant_slug then kong.service.request.set_header("X-Tenant-Slug", tostring(claims.tenant_slug)) end
+                  if claims.role        then kong.service.request.set_header("X-Role",        tostring(claims.role))        end
+                  if claims.username    then kong.service.request.set_header("X-Username",    tostring(claims.username))    end
