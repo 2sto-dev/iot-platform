@@ -1,10 +1,7 @@
 from rest_framework import serializers as drf_serializers
 from rest_framework import viewsets
-from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from django.shortcuts import get_object_or_404
-from django.contrib.auth import get_user_model
+from tenants.permissions import TenantRolePermission
 from .models import Device
 from .serializers import DeviceSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView
@@ -12,12 +9,14 @@ from .tokens import CustomTokenObtainPairSerializer
 
 
 class DeviceViewSet(viewsets.ModelViewSet):
-    """CRUD pentru Device cu izolare per-tenant.
+    """CRUD pentru Device cu izolare per-tenant + RBAC.
 
-    - Superuser sau service account (perm `clients.view_device`) → cross-tenant.
-    - User autentificat cu tenant context → vede TOATE device-urile din tenantul lui.
-    - Fără tenant context → empty queryset.
+    - Superuser sau service account (perm clients.view_device) → cross-tenant.
+    - User autentificat cu tenant context → device-urile din tenantul lui.
+    - Filtru opțional: ?username=<username>.
+    - RBAC: gestionat de TenantRolePermission (vezi tenants/permissions.py).
     """
+    permission_classes = [IsAuthenticated, TenantRolePermission]
     serializer_class = DeviceSerializer
     queryset = Device.objects.all()
 
@@ -26,9 +25,14 @@ class DeviceViewSet(viewsets.ModelViewSet):
         if not user.is_authenticated:
             return Device.objects.none()
         if user.is_superuser or user.has_perm("clients.view_device"):
-            return Device.objects.all()
-        tenant_id = getattr(self.request, "tenant_id", None)
-        return Device.objects.for_tenant(tenant_id)
+            qs = Device.objects.all()
+        else:
+            tenant_id = getattr(self.request, "tenant_id", None)
+            qs = Device.objects.for_tenant(tenant_id)
+        username = self.request.query_params.get("username")
+        if username:
+            qs = qs.filter(client__username=username)
+        return qs
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -44,22 +48,3 @@ class DeviceViewSet(viewsets.ModelViewSet):
 class CustomTokenObtainPairView(TokenObtainPairView):
     """View pentru login cu user/parolă → JWT"""
     serializer_class = CustomTokenObtainPairSerializer
-
-
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
-def user_devices(request, username):
-    """
-    Returnează device-urile pentru userul specificat.
-    - Superuser poate vedea device-urile oricui.
-    - User normal vede doar device-urile proprii.
-    """
-    Client = get_user_model()
-    user = get_object_or_404(Client, username=username)
-
-    if request.user != user and not request.user.is_superuser:
-        return Response({"detail": "Not authorized"}, status=403)
-
-    devices = Device.objects.filter(client=user)
-    serializer = DeviceSerializer(devices, many=True)
-    return Response(serializer.data)
