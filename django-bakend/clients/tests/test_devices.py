@@ -4,11 +4,17 @@ from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
 from clients.models import Device
+from tenants.models import Tenant
 
 
 @pytest.fixture
 def api():
     return APIClient()
+
+
+@pytest.fixture
+def tenant(db):
+    return Tenant.objects.create(name="Default", slug="default")
 
 
 @pytest.fixture
@@ -24,9 +30,10 @@ def other_user(db):
 
 
 @pytest.fixture
-def alice_device(user):
+def alice_device(user, tenant):
     return Device.objects.create(
         client=user,
+        tenant=tenant,
         serial_number="ALICE-001",
         description="Alice's device",
         device_type="shelly_em",
@@ -34,9 +41,10 @@ def alice_device(user):
 
 
 @pytest.fixture
-def bob_device(other_user):
+def bob_device(other_user, tenant):
     return Device.objects.create(
         client=other_user,
+        tenant=tenant,
         serial_number="BOB-001",
         description="Bob's device",
         device_type="nous_at",

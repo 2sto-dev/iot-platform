@@ -13,6 +13,7 @@ class DeviceSerializer(serializers.ModelSerializer):
             "description",
             "device_type",
             "client",
+            "tenant",
             "topics",
         ]
 
