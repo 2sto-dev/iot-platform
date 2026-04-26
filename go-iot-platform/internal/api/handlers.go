@@ -14,17 +14,23 @@ import (
 	"go-iot-platform/internal/influx"
 )
 
-// Înregistrăm toate rutele API-ului Go
+// Înregistrăm rutele API-ului Go.
 func RegisterRoutes(mux *http.ServeMux) {
-	// Endpoint principal: valori metrice pentru un device
 	mux.Handle("/metrics/", http.HandlerFunc(metricsHandler))
 }
 
-// extrage username din JWT (Authorization: Bearer <token>)
-func getUsernameFromToken(r *http.Request) (string, error) {
+// Claims-urile relevante extrase din JWT după validarea făcută de Kong.
+type tokenContext struct {
+	Username   string
+	TenantID   int64
+	TenantSlug string
+	Role       string
+}
+
+func getTokenContext(r *http.Request) (tokenContext, error) {
 	authHeader := r.Header.Get("Authorization")
 	if !strings.HasPrefix(authHeader, "Bearer ") {
-		return "", fmt.Errorf("missing bearer token")
+		return tokenContext{}, fmt.Errorf("missing bearer token")
 	}
 	tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
@@ -33,47 +39,54 @@ func getUsernameFromToken(r *http.Request) (string, error) {
 		return []byte(config.Get("JWT_SECRET")), nil
 	})
 	if err != nil || !token.Valid {
-		return "", fmt.Errorf("invalid token: %v", err)
+		return tokenContext{}, fmt.Errorf("invalid token: %v", err)
 	}
 
-	username, ok := claims["username"].(string)
-	if !ok || username == "" {
-		return "", fmt.Errorf("username missing in token")
+	username, _ := claims["username"].(string)
+	if username == "" {
+		return tokenContext{}, fmt.Errorf("username missing in token")
 	}
-	return username, nil
+
+	ctx := tokenContext{Username: username}
+	if v, ok := claims["tenant_id"].(float64); ok {
+		ctx.TenantID = int64(v)
+	}
+	if s, ok := claims["tenant_slug"].(string); ok {
+		ctx.TenantSlug = s
+	}
+	if s, ok := claims["role"].(string); ok {
+		ctx.Role = s
+	}
+	if ctx.TenantID == 0 {
+		return tokenContext{}, fmt.Errorf("tenant_id missing in token")
+	}
+	return ctx, nil
 }
 
-// GET /go/metrics/{device}/{field}
-// - JWT validat de Kong, Go decodează și extrage username
-// - Verifică în Django dacă userul are acces la device
-// - Citește ultima valoare din InfluxDB pentru acel câmp
+// GET /go/metrics/{device}/{field}?range=15m
+// JWT validat de Kong; Go re-decodează ca să extragă tenant_id + verifică în Django
+// că device-ul e al userului IN tenant-ul curent, apoi citește din Influx (filtrat pe tenant_id).
 func metricsHandler(w http.ResponseWriter, r *http.Request) {
-	// log de debug pentru request
 	log.Printf("👉 Request primit: %s %s", r.Method, r.URL.Path)
-	log.Printf("👉 Headers: %+v", r.Header)
 
-	username, err := getUsernameFromToken(r)
+	tc, err := getTokenContext(r)
 	if err != nil {
 		log.Printf("❌ JWT error: %v", err)
 		http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
 		return
 	}
-	log.Printf("✅ User extras din token: %s", username)
+	log.Printf("✅ Token: user=%s tenant=%d (%s) role=%s", tc.Username, tc.TenantID, tc.TenantSlug, tc.Role)
 
-	// extragem device și field din path
 	path := strings.TrimPrefix(r.URL.Path, "/metrics/")
 	segments := strings.Split(path, "/")
 	if len(segments) != 2 {
-		log.Printf("❌ Path invalid: %s", path)
 		http.Error(w, "Invalid metric path. Use /metrics/{device}/{field}", http.StatusBadRequest)
 		return
 	}
 	device := segments[0]
 	field := segments[1]
-	log.Printf("🔎 Device: %s, Field: %s", device, field)
 
-	// verificăm în Django dacă userul are acces
-	devices, err := django.GetDevicesForUser(username)
+	devices, err := django.GetDevicesForUserInTenant(tc.Username, tc.TenantID)
 	if err != nil {
 		log.Printf("❌ Django error: %v", err)
 		http.Error(w, "Django error: "+err.Error(), http.StatusInternalServerError)
@@ -87,27 +100,24 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !allowed {
-		log.Printf("⛔ User %s NU are acces la device %s", username, device)
-		http.Error(w, "Device not allowed for user", http.StatusForbidden)
+		log.Printf("⛔ user=%s tenant=%d nu are acces la device=%s", tc.Username, tc.TenantID, device)
+		http.Error(w, "Device not allowed for user/tenant", http.StatusForbidden)
 		return
 	}
-	log.Printf("✅ User %s are acces la device %s", username, device)
 
-	// citim valoarea din Influx (range opțional din query string, default -5m)
 	rangeStr := r.URL.Query().Get("range")
-	val, err := influx.GetFieldForDevice(device, field, rangeStr)
+	val, err := influx.GetFieldForDevice(device, field, rangeStr, tc.TenantID)
 	if err != nil {
 		log.Printf("❌ Influx error pentru %s/%s: %v", device, field, err)
 		http.Error(w, "Influx error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	log.Printf("📊 Valoare din Influx pentru %s/%s: %v", device, field, val)
 
-	// răspuns JSON
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"device": device,
-		"field":  field,
-		"value":  val,
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"device":    device,
+		"field":     field,
+		"value":     val,
+		"tenant_id": tc.TenantID,
 	})
 }

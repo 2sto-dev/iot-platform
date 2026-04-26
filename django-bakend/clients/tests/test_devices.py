@@ -120,6 +120,31 @@ def test_service_account_sees_all_devices(api, acme_device, globex_device):
     assert serials == ["ACME-001", "GLOBEX-001"]
 
 
+def test_filter_by_username_query_param(api, alice_in_acme, acme_device):
+    other = get_user_model().objects.create_user(username="charlie", password="pw", prenume="C")
+    Device.objects.create(client=other, tenant=acme_device.tenant, serial_number="CHARLIE-1", device_type="shelly_em")
+    login(api, "alice")
+    r = api.get("/api/devices/?username=alice")
+    assert r.status_code == 200
+    serials = [d["serial_number"] for d in r.json()]
+    assert serials == ["ACME-001"]
+
+
+def test_filter_by_tenant_query_param_for_service_account(api, acme_device, globex_device):
+    """Service account uses ?tenant= to scope cross-tenant queries."""
+    from django.contrib.auth.models import Permission
+    from django.contrib.contenttypes.models import ContentType
+    User = get_user_model()
+    svc = User.objects.create_user(username="iot-ingest", password="pw", prenume="Ingest")
+    ct = ContentType.objects.get_for_model(Device)
+    svc.user_permissions.add(Permission.objects.get(content_type=ct, codename="view_device"))
+    api.force_authenticate(user=svc)
+    r = api.get(f"/api/devices/?tenant={acme_device.tenant_id}")
+    assert r.status_code == 200
+    serials = [d["serial_number"] for d in r.json()]
+    assert serials == ["ACME-001"]
+
+
 def test_device_create_uses_tenant_from_jwt(api, alice_in_acme, acme, globex):
     """Even if user POSTs tenant=globex.id, the JWT's tenant (acme) is used."""
     login(api, "alice")

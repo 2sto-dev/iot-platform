@@ -140,10 +140,11 @@ func GetAllDevices() ([]Device, error) {
 	return devs, nil
 }
 
-// 📥 Device-urile unui user
-func GetDevicesForUser(username string) ([]Device, error) {
+// 📥 Device-urile unui user în cadrul unui tenant (filtrare server-side via ?username=&tenant=)
+func GetDevicesForUserInTenant(username string, tenantID int64) ([]Device, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
-	req, _ := http.NewRequest("GET", fmt.Sprintf("%s/devices/%s/", baseURL, username), nil)
+	url := fmt.Sprintf("%s/devices/?username=%s&tenant=%d", baseURL, username, tenantID)
+	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
 	resp, err := client.Do(req)
@@ -166,7 +167,7 @@ func GetDevicesForUser(username string) ([]Device, error) {
 
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("error fetching devices for user %s (%d): %s", username, resp.StatusCode, string(data))
+		return nil, fmt.Errorf("error fetching devices for user=%s tenant=%d (%d): %s", username, tenantID, resp.StatusCode, string(data))
 	}
 
 	var devs []Device

@@ -32,6 +32,9 @@ class DeviceViewSet(viewsets.ModelViewSet):
         username = self.request.query_params.get("username")
         if username:
             qs = qs.filter(client__username=username)
+        tenant_filter = self.request.query_params.get("tenant")
+        if tenant_filter:
+            qs = qs.filter(tenant_id=tenant_filter)
         return qs
 
     def perform_create(self, serializer):
