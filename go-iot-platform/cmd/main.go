@@ -162,18 +162,19 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 	deviceID := parts[1]
 
 	devices, _ := django.GetAllDevices()
+	tenantTag := "unassigned"
 	found := false
 	for _, d := range devices {
 		if d.Serial == deviceID {
 			found = true
+			if d.TenantID > 0 {
+				tenantTag = strconv.FormatInt(d.TenantID, 10)
+			}
 			break
 		}
 	}
-
-	assignment := "assigned"
 	if !found {
-		assignment = "unassigned"
-		log.Printf("⚠️ Device necunoscut %s (topic %s) — telemetrie marcată unassigned, NU se mai auto-înregistrează", deviceID, topic)
+		log.Printf("⚠️ Device necunoscut %s (topic %s) — telemetrie marcată tenant_id=unassigned, NU se mai auto-înregistrează", deviceID, topic)
 	}
 
 	// Scriere în Influx (cu loguri pe fiecare caz)
@@ -186,7 +187,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 		}
 		field := parts[len(parts)-1]
 		p := influxdb2.NewPoint("devices",
-			map[string]string{"device": deviceID, "source": "shelly", "type": "power_meter", "assignment": assignment},
+			map[string]string{"device": deviceID, "source": "shelly", "type": "power_meter", "tenant_id": tenantTag},
 			map[string]interface{}{titleCaser.String(field): value},
 			time.Now())
 		_ = writeAPI.WritePoint(context.Background(), p)
@@ -199,7 +200,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 			state = 1
 		}
 		p := influxdb2.NewPoint("devices",
-			map[string]string{"device": deviceID, "source": "shelly", "type": "relay", "assignment": assignment},
+			map[string]string{"device": deviceID, "source": "shelly", "type": "relay", "tenant_id": tenantTag},
 			map[string]interface{}{"state": state},
 			time.Now())
 		_ = writeAPI.WritePoint(context.Background(), p)
@@ -212,7 +213,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 			return
 		}
 		p := influxdb2.NewPoint("devices",
-			map[string]string{"device": deviceID, "source": "nousat", "type": "state", "assignment": assignment},
+			map[string]string{"device": deviceID, "source": "nousat", "type": "state", "tenant_id": tenantTag},
 			map[string]interface{}{"POWER": state.POWER, "RSSI": state.RSSI},
 			time.Now())
 		_ = writeAPI.WritePoint(context.Background(), p)
@@ -229,7 +230,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 			t = time.Now()
 		}
 		p := influxdb2.NewPoint("devices",
-			map[string]string{"device": deviceID, "source": "nousat", "type": "energy", "assignment": assignment},
+			map[string]string{"device": deviceID, "source": "nousat", "type": "energy", "tenant_id": tenantTag},
 			map[string]interface{}{
 				"Power":   sensor.ENERGY.Power,
 				"Voltage": sensor.ENERGY.Voltage,
@@ -247,7 +248,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 			return
 		}
 		p := influxdb2.NewPoint("devices",
-			map[string]string{"device": deviceID, "source": "zigbee2mqtt", "type": "sensor", "assignment": assignment},
+			map[string]string{"device": deviceID, "source": "zigbee2mqtt", "type": "sensor", "tenant_id": tenantTag},
 			data,
 			time.Now())
 		_ = writeAPI.WritePoint(context.Background(), p)
@@ -257,7 +258,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 		var data map[string]interface{}
 		if err := json.Unmarshal(payload, &data); err == nil {
 			p := influxdb2.NewPoint("devices",
-				map[string]string{"device": deviceID, "source": "generic", "type": "auto_detected", "assignment": assignment},
+				map[string]string{"device": deviceID, "source": "generic", "type": "auto_detected", "tenant_id": tenantTag},
 				data,
 				time.Now())
 			_ = writeAPI.WritePoint(context.Background(), p)
@@ -271,7 +272,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 				val = valStr
 			}
 			p := influxdb2.NewPoint("devices",
-				map[string]string{"device": deviceID, "source": "generic", "type": "auto_detected", "assignment": assignment},
+				map[string]string{"device": deviceID, "source": "generic", "type": "auto_detected", "tenant_id": tenantTag},
 				map[string]interface{}{"value": val},
 				time.Now())
 			_ = writeAPI.WritePoint(context.Background(), p)
