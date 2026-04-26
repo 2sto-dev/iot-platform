@@ -20,21 +20,39 @@ func signedToken(t *testing.T, secret string, claims jwt.MapClaims) string {
 	return s
 }
 
-func TestGetUsernameFromToken(t *testing.T) {
+func TestGetTokenContext(t *testing.T) {
 	const secret = "unit-test-secret"
 	t.Setenv("JWT_SECRET", secret)
-	os.Setenv("JWT_SECRET", secret) // ensure config.Get sees it
+	os.Setenv("JWT_SECRET", secret)
+
+	now := time.Now().Add(time.Hour).Unix()
 
 	cases := []struct {
-		name        string
-		authHeader  string
-		wantErr     bool
-		wantUser    string
+		name       string
+		authHeader string
+		wantErr    bool
+		wantUser   string
+		wantTenant int64
 	}{
 		{
-			name:       "valid",
-			authHeader: "Bearer " + signedToken(t, secret, jwt.MapClaims{"username": "alice", "exp": time.Now().Add(time.Hour).Unix()}),
+			name: "valid with tenant",
+			authHeader: "Bearer " + signedToken(t, secret, jwt.MapClaims{
+				"username":    "alice",
+				"tenant_id":   42,
+				"tenant_slug": "acme",
+				"role":        "OWNER",
+				"exp":         now,
+			}),
 			wantUser:   "alice",
+			wantTenant: 42,
+		},
+		{
+			name: "missing tenant_id",
+			authHeader: "Bearer " + signedToken(t, secret, jwt.MapClaims{
+				"username": "alice",
+				"exp":      now,
+			}),
+			wantErr: true,
 		},
 		{
 			name:       "missing header",
@@ -47,19 +65,26 @@ func TestGetUsernameFromToken(t *testing.T) {
 			wantErr:    true,
 		},
 		{
-			name:       "bad signature",
-			authHeader: "Bearer " + signedToken(t, "other-secret", jwt.MapClaims{"username": "alice", "exp": time.Now().Add(time.Hour).Unix()}),
-			wantErr:    true,
+			name: "bad signature",
+			authHeader: "Bearer " + signedToken(t, "other-secret", jwt.MapClaims{
+				"username": "alice", "tenant_id": 1, "exp": now,
+			}),
+			wantErr: true,
 		},
 		{
-			name:       "expired",
-			authHeader: "Bearer " + signedToken(t, secret, jwt.MapClaims{"username": "alice", "exp": time.Now().Add(-time.Hour).Unix()}),
-			wantErr:    true,
+			name: "expired",
+			authHeader: "Bearer " + signedToken(t, secret, jwt.MapClaims{
+				"username": "alice", "tenant_id": 1,
+				"exp": time.Now().Add(-time.Hour).Unix(),
+			}),
+			wantErr: true,
 		},
 		{
-			name:       "username missing",
-			authHeader: "Bearer " + signedToken(t, secret, jwt.MapClaims{"exp": time.Now().Add(time.Hour).Unix()}),
-			wantErr:    true,
+			name: "username missing",
+			authHeader: "Bearer " + signedToken(t, secret, jwt.MapClaims{
+				"tenant_id": 1, "exp": now,
+			}),
+			wantErr: true,
 		},
 	}
 
@@ -69,18 +94,21 @@ func TestGetUsernameFromToken(t *testing.T) {
 			if tc.authHeader != "" {
 				req.Header.Set("Authorization", tc.authHeader)
 			}
-			user, err := getUsernameFromToken(req)
+			ctx, err := getTokenContext(req)
 			if tc.wantErr {
 				if err == nil {
-					t.Fatalf("expected error, got user=%q", user)
+					t.Fatalf("expected error, got %+v", ctx)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if user != tc.wantUser {
-				t.Errorf("user = %q, want %q", user, tc.wantUser)
+			if ctx.Username != tc.wantUser {
+				t.Errorf("user = %q, want %q", ctx.Username, tc.wantUser)
+			}
+			if ctx.TenantID != tc.wantTenant {
+				t.Errorf("tenant = %d, want %d", ctx.TenantID, tc.wantTenant)
 			}
 		})
 	}
