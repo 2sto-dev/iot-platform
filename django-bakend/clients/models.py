@@ -19,9 +19,17 @@ class Device(models.Model):
     ]
 
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name="devices")
-    serial_number = models.CharField(max_length=100, unique=True)
+    tenant = models.ForeignKey(
+        "tenants.Tenant",
+        on_delete=models.PROTECT,
+        related_name="devices",
+    )
+    serial_number = models.CharField(max_length=100)
     description = models.CharField(max_length=200, blank=True)
     device_type = models.CharField(max_length=20, choices=DEVICE_CHOICES)
+
+    class Meta:
+        unique_together = ("tenant", "serial_number")
 
     def __str__(self):
         return f"{self.serial_number} - {self.get_device_type_display()} ({self.client.username})"
