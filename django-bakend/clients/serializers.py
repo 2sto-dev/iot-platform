@@ -16,6 +16,10 @@ class DeviceSerializer(serializers.ModelSerializer):
             "tenant",
             "topics",
         ]
+        extra_kwargs = {
+            "tenant": {"required": False},
+            "client": {"required": False},
+        }
 
     def get_topics(self, obj):
         template_list = TOPIC_TEMPLATES.get(obj.device_type, [])

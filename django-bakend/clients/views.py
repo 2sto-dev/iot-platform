@@ -1,3 +1,4 @@
+from rest_framework import serializers as drf_serializers
 from rest_framework import viewsets
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -11,13 +12,14 @@ from .tokens import CustomTokenObtainPairSerializer
 
 
 class DeviceViewSet(viewsets.ModelViewSet):
-    """CRUD pentru Device.
+    """CRUD pentru Device cu izolare per-tenant.
 
-    - Superuser sau service account (cu perm `clients.view_device`) văd toate device-urile.
-    - Useri obișnuiți autentificați văd doar device-urile proprii.
+    - Superuser sau service account (perm `clients.view_device`) → cross-tenant.
+    - User autentificat cu tenant context → vede TOATE device-urile din tenantul lui.
+    - Fără tenant context → empty queryset.
     """
-    queryset = Device.objects.all()
     serializer_class = DeviceSerializer
+    queryset = Device.objects.all()
 
     def get_queryset(self):
         user = self.request.user
@@ -25,7 +27,18 @@ class DeviceViewSet(viewsets.ModelViewSet):
             return Device.objects.none()
         if user.is_superuser or user.has_perm("clients.view_device"):
             return Device.objects.all()
-        return Device.objects.filter(client=user)
+        tenant_id = getattr(self.request, "tenant_id", None)
+        return Device.objects.for_tenant(tenant_id)
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if user.is_superuser or user.has_perm("clients.add_device"):
+            serializer.save()
+            return
+        tenant_id = getattr(self.request, "tenant_id", None)
+        if tenant_id is None:
+            raise drf_serializers.ValidationError({"tenant": "No tenant context in token."})
+        serializer.save(tenant_id=tenant_id, client=user)
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
