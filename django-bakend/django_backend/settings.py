@@ -108,3 +108,8 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=100),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
 }
+
+# Kill-switch pentru întreg flow-ul multi-tenant (TenantMiddleware + queryset filter).
+# La False: middleware devine no-op și viewset-urile permit acces ne-tenant-scoped.
+# Util pentru rollback de urgență fără rollback de migrare DB.
+MULTI_TENANT_ENABLED = config("MULTI_TENANT_ENABLED", default=True, cast=bool)
