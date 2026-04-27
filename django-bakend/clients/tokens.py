@@ -16,6 +16,12 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         # Authenticate without letting the parent build tokens (we need tenant info first).
         super(TokenObtainPairSerializer, self).validate(attrs)
 
+        # Service accounts (clients.view_device) bypass tenant selection — they're
+        # cross-tenant by design. Token has no tenant_id/role claims.
+        if self.user.has_perm("clients.view_device") and not self.user.is_superuser:
+            refresh = self.get_token(self.user)
+            return {"refresh": str(refresh), "access": str(refresh.access_token)}
+
         memberships = list(
             Membership.objects.filter(user=self.user, tenant__status=Tenant.Status.ACTIVE)
             .select_related("tenant")

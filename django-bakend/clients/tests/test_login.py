@@ -94,6 +94,27 @@ def test_login_suspended_tenant_excluded(api, alice, acme):
     assert "no active tenant" in str(r.json()).lower()
 
 
+def test_service_account_login_without_membership(api, db):
+    """User cu perm clients.view_device (service account) login-ează fără membership."""
+    from django.contrib.auth.models import Permission
+    from django.contrib.contenttypes.models import ContentType
+    from clients.models import Device
+
+    User = get_user_model()
+    svc = User.objects.create_user(username="iot-ingest", password="pw", prenume="Ingest")
+    ct = ContentType.objects.get_for_model(Device)
+    svc.user_permissions.add(Permission.objects.get(content_type=ct, codename="view_device"))
+
+    r = api.post("/api/token/", {"username": "iot-ingest", "password": "pw"}, format="json")
+    assert r.status_code == 200, r.json()
+    body = r.json()
+    assert "access" in body
+    # Service accounts get tokens WITHOUT tenant claims (cross-tenant by design).
+    claims = decode(body["access"])
+    assert "tenant_id" not in claims
+    assert claims["username"] == "iot-ingest"
+
+
 def test_refresh_token_carries_tenant_claims(alice, acme):
     """Custom claims set on the refresh token must be inherited by access tokens derived from it."""
     Membership.objects.create(user=alice, tenant=acme, role=Membership.Role.OWNER)
