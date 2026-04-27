@@ -152,14 +152,15 @@ Scop: introducerea conceptului de **Tenant** la toate nivelele (DB, JWT, API, lo
 
 Precondiție absolută: **Faza 1 încheiată.** Fără tenant_id în pipeline, scaling-ul reproduce defecte la scară mai mare.
 
-### 2.1 MQTT broker clusterizabil cu ACL
+### 2.1 EMQX clusterizabil cu ACL pe VM dedicat
 - **Depinde de:** 1.6 (consumer pattern), 1.8 (tenant tagging)
-- **Fișiere:** instalare nativă EMQX/VerneMQ pe gazdă (binar oficial sau systemd unit), schemă topic-uri.
+- **Fișiere:** config EMQX (`/etc/emqx/emqx.conf` pe VM-mqtt), schemă topic-uri.
 - **Acțiune:**
-  - Înlocuiește Mosquitto cu **EMQX** (open source, are ACL via HTTP hook).
-  - Topic schema nouă: `tenants/{tid}/devices/{did}/up/{stream}` și `down/cmd`.
-  - ACL via webhook către Django: la publish/subscribe, EMQX întreabă Django dacă device-ul are dreptul la topic.
-- **Done when:** un device cu credențiale tenant A nu poate publica pe topic tenant B.
+  - **EMQX-ul existent** se mută pe VM-ul dedicat (vezi §Topologie deploy Faza 2). Config minim păstrat compatibil cu device-urile actuale (user/pass shared) la primul cutover.
+  - Topic schema nouă, tenant-aware: `tenants/{tid}/devices/{did}/up/{stream}` și `down/cmd`.
+  - **HTTP ACL hook** către Django (`/api/mqtt-auth/`): la connect/publish/subscribe, EMQX întreabă Django dacă credențialele și topicul sunt valide pentru device. Permite revocation instant și ACL per-tenant.
+  - (Opțional acum, obligatoriu pentru 3.1) listener TLS pe `:8883` cu certificat de la Let's Encrypt sau CA internă.
+- **Done when:** un device cu credențiale tenant A nu poate publica pe topic tenant B (refuzat de EMQX la publish).
 
 ### 2.2 MQTT bridge pentru device-uri legacy (Shelly/NousAT/Zigbee2MQTT)
 - **Depinde de:** 2.1
@@ -246,29 +247,101 @@ Precondiție: Faza 2 încheiată (avem ACL, topology corectă, cache).
 
 ## Faza 4 — Funcționalități de platformă
 
-Toate sub-pasele sunt **paralelizabile** între ele. Precondiție: Faza 3 încheiată.
+Precondiție generală: **Faza 3 încheiată** (provisioning, downlink, shadow, OTA).
+
+Spre deosebire de Fazele 1–3 (strict secvențiale între ele), sub-pașii Fazei 4 sunt paralelizabili pe direcții independente — DAR au corelații interne care dictează o ordine **recomandată** (nu obligatorie):
+
+```
+4.4 (observabilitate)  ─────┐
+                            ├──► 4.6 (billing — extrage metrici)
+4.3 (Open API)  ─────┬──────┘
+                     ├──► 4.5 (mobile SDK — depinde de API stabil)
+4.1 (rule engine)  ──┴──► 4.2 (notifications — declanșate de reguli)
+                          
+4.7 (audit log) — populat de toate celelalte
+```
+
+Rezumat dependențe pe verticală (ce a livrat Faza 1/2/3 și e folosit aici):
+
+| Faza 4.x | Folosește din Faza 1 | Folosește din Faza 2 | Folosește din Faza 3 |
+|----------|----------------------|----------------------|----------------------|
+| 4.1 Rules | 1.4 (tenant context), 1.8 (tenant_id pe Influx) | 2.3 (worker stateless), 2.4 (cache) | 3.3 (downlink) |
+| 4.2 Notifications | 1.1 (Tenant) | 2.6 (Kafka opțional) | — |
+| 4.3 Open API | 1.5 (RBAC), 1.6 (Kong propagare) | — | — |
+| 4.4 Observability | 1.6 (X-Tenant-Id în logs) | 2.4 (Redis hit/miss), 2.5 (Influx batch metrics) | 3.3 (cmd success rate) |
+| 4.5 Mobile SDK | 1.3 (JWT cu tenant), 1.5 (RBAC) | — | 3.1 (provisioning), 3.3 (cmd), 3.4 (shadow) |
+| 4.6 Billing | 1.1 (Tenant.plan), 1.8 (metering Influx) | 2.7 (bucket per plan), 2.1 (EMQX hook quotas) | — |
+| 4.7 Audit log | 1.4 (TenantMiddleware) | 2.6 (Kafka opțional) | — |
 
 ### 4.1 Rule engine / scenes / automations
-- **Acțiune:** model `Rule(when, conditions, actions)`, evaluator pe stream MQTT (Go consumer separat).
-- **Fișiere noi:** `django-bakend/rules/`, `go-iot-platform/cmd/rule-engine/`.
+- **Depinde de:** 1.4 (tenant context), 1.8 (telemetrie tagged tenant_id), 2.3 (worker stateless cu shared subscription), 2.4 (cache device→tenant), 3.3 (downlink command path)
+- **Fișiere noi:** `django-bakend/rules/` (model + viewset), `go-iot-platform/cmd/rule-engine/` (worker)
+- **Acțiune:**
+  - Model `Rule(tenant FK, name, when_topic_pattern, conditions JSON, actions JSON, enabled)` cu unique_together (tenant, name)
+  - Evaluator Go ca **shared subscriber** pe `$share/rules/tenants/+/devices/+/up/#` (folosește pattern-ul de la 2.3)
+  - Pe match, publică pe `tenants/{tid}/devices/{did}/down/cmd` (refolosește path-ul downlink din 3.3)
+  - Cache regulilor în Redis (refolosește infrastructura din 2.4) cu invalidare pe Django signal
+- **Done when:** Regulă „dacă power > 1000W → trimite OFF" execută în <1s la mesajul de telemetrie.
 
 ### 4.2 Notifications (FCM/APNs/email/webhooks)
-- **Fișiere noi:** `notifications/` Django app + provider integrations.
+- **Depinde de:** 1.1 (Tenant pentru notification preferences), 4.1 (rules emit notification events), 2.6 opțional (Kafka pentru retry decuplat)
+- **Fișiere noi:** `django-bakend/notifications/`, `go-iot-platform/cmd/notifier/`
+- **Acțiune:**
+  - Modele Django: `NotificationChannel(tenant, type{push,email,sms,webhook}, config)`, `NotificationEvent(tenant, channel, payload, status, attempts)`
+  - Worker Go consumă coadă (Kafka topic dacă 2.6 e implementat, altfel Redis Streams) și apelează provider-ul (FCM, SES/SMTP, Twilio, HTTP)
+  - Retry exponential cu DLQ; status vizibil prin API
+- **Done when:** un eveniment trigger-uit de o regulă (4.1) ajunge pe canalul configurat în <5s, cu retry pe failure.
 
 ### 4.3 Open API public + portal developer
-- **Acțiune:** versionare `/api/v1/`, OpenAPI spec, generator de keys, portal Sphinx/Redoc.
+- **Depinde de:** 1.5 (RBAC stabilizat), 1.6 (Kong propagare X-Tenant-Id la upstream), 4.4 (extragere metrici per cheie pentru 4.6)
+- **Fișiere noi:** `django-bakend/api_keys/`, `docs/api/` (OpenAPI spec generat)
+- **Acțiune:**
+  - Versionare API: `/api/v1/` (păstrează `/api/` ca deprecated cu `Sunset` header pe 6 luni)
+  - Model `APIKey(tenant, key_hash, scopes, expires_at, last_used_at)` + endpoint pentru rotație
+  - OpenAPI spec auto-generat (drf-spectacular)
+  - Portal developer (Redoc static) la `developers.<domain>`
+  - Plugin Kong `key-auth` (sau hibrid jwt+key-auth) — distinct de 1.6 care e doar pentru sesiuni user
+- **Done when:** un developer extern poate genera o cheie via dashboard, citi spec-ul, și executa CRUD device fără a folosi UI-ul nostru.
 
 ### 4.4 Observabilitate end-to-end
-- **Acțiune:** OpenTelemetry (Django + Go), Prometheus client în ambele, Grafana dashboards, Loki pentru log-uri, alerting.
+- **Depinde de:** 0.5 (CI), 1.6 (X-Tenant-Id propagat → poate fi folosit ca label), 2.4 (cache hit/miss metrics), 2.5 (Influx batch flush metrics), 3.3 (cmd ack rate)
+- **Fișiere noi:** instrumentare în Django/Go existent + `monitoring/` cu dashboard-uri Grafana
+- **Acțiune:**
+  - **OpenTelemetry SDK** în Django + Go: auto-instrument pentru HTTP, DB, Redis, MQTT publish, Influx writes
+  - **Prometheus client** direct în ambele (peste exporter-ul Kong existent din Faza 0) — metrici cu label `tenant_id`
+  - **Loki** pentru logs structurate (Promtail pe gazde) cu label `tenant_id` extras din header-ul X-Tenant-Id (din 1.6)
+  - **Grafana** dashboards: ingest rate per tenant, latență end-to-end, erori per endpoint, cache hit ratio, MQTT lag
+  - **Alertmanager**: SLO 99.9% pe `/api/devices`, lag MQTT > 10s, cache hit < 95%
+- **Done when:** drill-down per tenant: care tenant generează cele mai multe mesaje, cât 5xx are, latențe.
 
 ### 4.5 Mobile SDK + white-label apps
-- **Acțiune:** SDK iOS/Android (out of scope ca implementare detaliată aici, dar înregistrat în plan ca dependență de 3.1, 3.3).
+- **Depinde de:** 1.3 (JWT cu tenant), 1.5 (RBAC), 3.1 (device credentials), 3.3 (commands), 3.4 (shadow), 4.3 (Open API stabil + key rotation)
+- **Acțiune:**
+  - SDK iOS (Swift) și Android (Kotlin): provisioning flow (BLE/SoftAP/QR), login JWT, comenzi via `/api/v1/`, shadow read/write
+  - White-label: theme + brand prin config build; un app per tenant major sau cross-tenant cu selecție la login
+- **Out of scope** ca implementare detaliată în acest plan (efort 16+ săptămâni, echipă dedicată); înregistrat ca dependență downstream a Fazei 3 + 4.3.
 
 ### 4.6 Billing & quotas
-- **Acțiune:** plan tiers, metering pe scrieri Influx + apeluri API, integrare Stripe.
+- **Depinde de:** 1.1 (Tenant.plan), 1.8 (telemetrie tagged tenant_id pentru count), 2.1 (EMQX hook poate respinge publish la depășire), 2.7 (retention diferit pe tier), 4.3 (API key metering), 4.4 (extracție metrici)
+- **Fișiere noi:** `django-bakend/billing/`, integrare Stripe
+- **Acțiune:**
+  - Modele: `PlanTier(name, max_devices, max_msgs_month, retention_days)`, `Usage(tenant, period, msg_count, api_calls)`
+  - Job lunar (Celery beat / cron) care agregă din Prometheus (api calls) și Influx (msg count cu `tenant_id` tag) → tabel Usage
+  - Integrare Stripe: webhook subscription, invoice generation
+  - **Enforcement quotas** pe 2 niveluri:
+    - **API:** rate-limit Kong per consumer/tenant (4.3 are deja key-auth, completăm cu `rate-limiting` plugin)
+    - **MQTT:** EMQX HTTP ACL hook (de la 2.1) verifică counter Redis înainte de publish
+- **Done when:** un tenant pe plan Free care depășește 10k msg/lună e blocat la următorul publish MQTT (refuzat de EMQX).
 
 ### 4.7 Audit log per tenant
-- **Acțiune:** tabel append-only `audit_log(tenant_id, actor, action, resource, ts)` populat din middleware Django + signal handlers.
+- **Depinde de:** 1.1 (Tenant), 1.4 (TenantMiddleware setează request.tenant_id), 2.6 opțional (Kafka pentru write async — decuplează request path de write log)
+- **Fișiere noi:** `django-bakend/audit/` (model + signals + viewset)
+- **Acțiune:**
+  - Tabel append-only `audit_log(id, tenant_id, actor_id, action, resource_type, resource_id, metadata jsonb, ip, ts)` pe MySQL (sau ClickHouse pentru volume mari)
+  - Populat din middleware Django (la fiecare CRUD pe ViewSet-uri tenant-aware) + signal `post_save`/`post_delete`
+  - Endpoint `/api/v1/audit/?from=&to=&actor=` cu filtre, vizibil doar pentru OWNER+ADMIN (RBAC din 1.5)
+  - Loki paralel pentru logs aplicative (4.4) — audit_log e structurat și permanent, Loki e volatil cu retenție scurtă
+- **Done when:** orice modificare făcută într-un tenant apare în log în <1s, cu actor, IP și payload diff.
 
 ---
 
@@ -278,9 +351,9 @@ La sfârșitul fiecărei faze, rulează:
 
 1. **Suite automatizat** (CI verde): `pytest django-bakend/`, `go test ./go-iot-platform/...`.
 2. **Smoke test integrat** (script `scripts/e2e.sh` sau `e2e.ps1`):
-   - Pornește componentele direct: `python manage.py runserver`, `./bin/go-iot-platform`, Kong (`kong start -c kong.conf`), MQTT broker și InfluxDB rulează ca servicii pe gazda existentă.
+   - Pornește componentele direct: `python manage.py runserver`, `./bin/go-iot-platform`, Kong (`kong start -c kong.conf`); EMQX și InfluxDB rulează ca servicii (după Faza 2: EMQX pe VM-mqtt, după 2.4: Redis pe VM-cache).
    - Creează 2 tenanți, 1 user pe fiecare, 1 device pe fiecare (după Faza 1).
-   - Publică un mesaj MQTT pe device-ul tenant A (`mosquitto_pub`).
+   - Publică un mesaj MQTT pe device-ul tenant A folosind `mqttx pub` (CLI oficial EMQX) sau orice client MQTT compatibil.
    - Verifică în Influx că punctul are `tenant_id=A` (`influx query`).
    - Cere API-ul Go cu token tenant B pentru device tenant A → așteaptă 403.
    - Cere cu token tenant A pentru device tenant A → așteaptă 200 cu valoarea publicată.
