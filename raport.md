@@ -1,7 +1,7 @@
-# Raport Faza 0 — Stabilizare și fundație de lucru
+# Raport Faza 0 + Faza 1 — Stabilizare și refactor multi-tenant
 
-> Data raport: 2026-04-26
-> Referință plan: [plan.md §Faza 0](plan.md)
+> Data raport: 2026-04-27 (Faza 0 încheiată 2026-04-26; Faza 1 încheiată 2026-04-27)
+> Referință plan: [plan.md](plan.md)
 > Referință analiză: [analiza.md](analiza.md)
 
 ---
@@ -215,10 +215,342 @@ Aceste lacune sunt acceptabile pentru ieșirea din Faza 0, dar fiecare modificar
 
 ---
 
-## 6. Concluzie și pas următor
+## 6. Concluzie Faza 0
 
-Faza 0 e încheiată cu suite-ul de teste verde. Nu există blocante pentru a începe **Faza 1.1 — Modelare Django: Tenant + Membership + Role** ([plan.md §1.1](plan.md)).
+Faza 0 e încheiată cu suite-ul de teste verde. Toate observațiile reziduale (rotație secrete, `.env` aliniat cu codul) sunt rezolvate. Nu există blocante pentru Faza 1.
 
-**Pas imediat următor recomandat:** crearea app-ului Django `tenants/` cu modelele `Tenant` și `Membership`, urmată de adăugarea `tenant_id` la `Device` printr-o migrație în 3 pași (nullable → backfill cu tenant „legacy" → NOT NULL + unique compus). Toate modificările trebuie să vină cu teste noi care extind suite-ul actual.
+---
+---
 
-Înainte de a începe Faza 1, trebuie închisă observația 4.1 (rotație secret în `.env` locale) — operațiune de 5 minute.
+# Raport Faza 1 — Refactor multi-tenant
+
+> Status: ✅ COMPLETĂ — toți pașii 1.1 → 1.8 livrați și deployed pe MySQL real (2026-04-27)
+
+## 7. Sumar executiv Faza 1
+
+Toate cele 8 sub-sarcini din [Faza 1 din plan.md](plan.md) au fost livrate. Suite-ul total a crescut de la 4 → **46 teste Django** + **8 sub-teste Go**, toate verzi:
+
+| Suite | Rezultat | Durată | Comandă |
+|-------|----------|--------|---------|
+| Django (pytest) | **46/46 passed** | 202.44 s | `pytest` în [django-bakend/](django-bakend/) |
+| Go (`go test ./...`) | **PASS** (8 sub-teste) | ~2.8 s | `go test ./...` în [go-iot-platform/](go-iot-platform/) |
+| `go vet ./...` | **clean** | <1 s | — |
+| `go build ./...` | **clean** | <1 s | — |
+| Migrare MySQL real | **OK** (4 migrări aplicate, 0 NULL-uri rămase) | 2026-04-27 | `python manage.py migrate` |
+
+**Commit-uri Faza 1 pe `origin/main`:**
+
+| Pas | Commit | Subiect |
+|-----|--------|---------|
+| 1.1 | `826f657` | App tenants cu Tenant + Membership |
+| 1.2 | `d16dab1` | tenant_id pe Device (migrare 3 pași) |
+| 1.3 | `58fa87d` | JWT include tenant_id, tenant_slug, role |
+| 1.4 | `5486b5f` | middleware + manager queryset tenant-aware |
+| 1.5 | `753758b` | RBAC explicit + curățare endpoint user_devices |
+| 1.6 | `8b45eae` | Kong propagă claim-urile JWT ca headere upstream |
+| 1.7 | `5c11259` | Go API tenant-aware |
+| 1.8 | `deeee13` | tag tenant_id pe scrierile MQTT → Influx |
+| fix | `5532f78` | service account bypass tenant membership |
+
+---
+
+## 8. Status detaliat pe sub-sarcini Faza 1
+
+### 8.1 Modelare Django: Tenant + Membership (1.1) — ✅ DONE
+
+App nouă `tenants/` cu:
+- [tenants/models.py](django-bakend/tenants/models.py) — `Tenant(name, slug, plan, status, created_at, updated_at)` + `Membership(user, tenant, role, created_at)` cu `unique_together(user, tenant)`. Toate enum-urile via `TextChoices`.
+- [tenants/admin.py](django-bakend/tenants/admin.py) — `TenantAdmin` cu prepopulated slug + `MembershipInline`; `MembershipAdmin` cu autocomplete.
+- [tenants/apps.py](django-bakend/tenants/apps.py) — config standard.
+- [tenants/migrations/0001_initial.py](django-bakend/tenants/migrations/0001_initial.py) — scrisă manual; verificată cu `makemigrations --check` (no drift).
+- Înregistrat în `INSTALLED_APPS` în [django_backend/settings.py](django-bakend/django_backend/settings.py).
+
+**Default-uri implementate:**
+- `Plan`: `free` / `pro` / `enterprise` (default `free`)
+- `Status`: `active` / `suspended` / `deleted` (default `active`)
+- `Role`: `OWNER` / `ADMIN` / `OPERATOR` / `VIEWER` / `INSTALLER` (default `VIEWER`)
+
+### 8.2 tenant_id pe Device + migrare 3 pași (1.2) — ✅ DONE
+
+- [clients/models.py](django-bakend/clients/models.py) — adăugat `Device.tenant = ForeignKey("tenants.Tenant", on_delete=PROTECT)`; păstrat `Device.client` pentru compat tranzitorie; `unique_together("tenant", "serial_number")`; `Device.objects = TenantQuerySet.as_manager()`.
+- 3 migrări:
+  - [0004_add_tenant_to_device.py](django-bakend/clients/migrations/0004_add_tenant_to_device.py) — AddField nullable.
+  - [0005_populate_legacy_tenant.py](django-bakend/clients/migrations/0005_populate_legacy_tenant.py) — `RunPython`: creează `Tenant(slug=legacy)`, `Membership(role=OWNER)` pentru fiecare user existent, atribuie device-urile.
+  - [0006_finalize_tenant_constraints.py](django-bakend/clients/migrations/0006_finalize_tenant_constraints.py) — NOT NULL + scoate unique global de pe serial_number + adaugă `unique_together(tenant, serial_number)`.
+- [serializers.py](django-bakend/clients/serializers.py) — include `tenant` în răspuns.
+
+**Rezultat după aplicare pe MySQL real (2026-04-27):**
+- 1 tenant `legacy` creat
+- 1 membership: user `admin` ↔ legacy ↔ OWNER
+- 3 device-uri existente atribuite tenantului `legacy`, 0 NULL-uri rămase
+
+### 8.3 JWT include tenant_id, tenant_slug, role (1.3) — ✅ DONE
+
+- [clients/tokens.py](django-bakend/clients/tokens.py) — `CustomTokenObtainPairSerializer.validate()` rescris:
+  - 0 active memberships → 400 (mesaj "no active tenant")
+  - 1 → implicit (slug verificat dacă e trimis)
+  - ≥2 → cere `tenant_slug` în request pentru disambiguare
+  - Tenant cu `status` în {`suspended`, `deleted`} → exclus din lista eligibilă
+  - Service account (cu perm `clients.view_device`) → bypass total (token fără claims tenant)
+- Refresh token poartă claims-urile (verificat prin `RefreshToken.access_token` derivat).
+- Răspunsul login include `tenant_slug` și `role` la nivelul JSON, pentru UX (frontend nu trebuie să decodeze JWT-ul).
+
+### 8.4 Middleware + manager queryset tenant-aware (1.4) — ✅ DONE
+
+- [tenants/middleware.py](django-bakend/tenants/middleware.py) — `TenantMiddleware` decodează JWT-ul (dacă există) și expune `request.tenant_id`, `request.tenant_slug`, `request.role`. Înregistrat la coada `MIDDLEWARE` în settings.
+- [tenants/managers.py](django-bakend/tenants/managers.py) — `TenantQuerySet` cu metodă `.for_tenant(tenant)` pentru filtrare explicită.
+- [clients/views.py](django-bakend/clients/views.py) — `DeviceViewSet`:
+  - `get_queryset`: superuser/service-account → cross-tenant; altfel filtrează pe `request.tenant_id`; suportă filtre `?username=` și `?tenant=`.
+  - `perform_create`: utilizatorii non-privilegiați au `tenant_id` și `client` setate forțat din JWT (ignoră payload-ul → previne spoof).
+- Endpoint-ul vechi `GET /api/devices/<username>/` (conflict de routing cu detail viewset) **eliminat**; înlocuit cu `?username=` filter.
+
+### 8.5 RBAC explicit (1.5) — ✅ DONE
+
+- [tenants/permissions.py](django-bakend/tenants/permissions.py) — `TenantRolePermission` aplicat în `DeviceViewSet`:
+  - **Read** (GET/HEAD/OPTIONS): toate rolurile.
+  - **Write** (POST/PUT/PATCH): OWNER, ADMIN, OPERATOR, INSTALLER.
+  - **Delete**: doar OWNER, ADMIN.
+  - Superuser și service account (perm `clients.view_device`) → bypass total.
+
+**Fix punctual în serializer (descoperit la testare):**
+- `DeviceSerializer.Meta.validators = []` — dezactivează `UniqueTogetherValidator(tenant, serial_number)` auto-generat care cerea `tenant` în input. Tenant e injectat server-side din JWT; constraint-ul DB rămâne valid.
+
+### 8.6 Kong propagă claim-urile JWT ca headere upstream (1.6) — ✅ DONE
+
+- [kong/kong.yaml](kong/kong.yaml) — plugin `pre-function` adăugat pe `django-devices` și `go-api`:
+  - Decodează payload-ul JWT (signature deja verificată de plugin-ul `jwt`).
+  - Setează 4 headere către upstream: `X-Tenant-Id`, `X-Tenant-Slug`, `X-Role`, `X-Username`.
+  - Lua minimal, dependențe doar din OpenResty/Kong bundled (`cjson.safe` + `ngx.decode_base64`).
+- Permite Django/Go să citească tenant info direct din header (fără re-decodare JWT — defense in depth).
+
+### 8.7 Go API tenant-aware (1.7) — ✅ DONE
+
+- [internal/api/handlers.go](go-iot-platform/internal/api/handlers.go) — `getUsernameFromToken` → `getTokenContext` care extrage `username`, `tenant_id`, `tenant_slug`, `role`. `tenant_id` mandatory pentru endpoint-uri end-user. Răspunsul `/metrics` include `tenant_id` în payload.
+- [internal/django/client.go](go-iot-platform/internal/django/client.go) — `GetDevicesForUser(username)` → `GetDevicesForUserInTenant(username, tenantID)` folosind endpoint-ul `?username=&tenant=`. `Device` struct extins cu `TenantID int64`.
+- [internal/influx/client.go](go-iot-platform/internal/influx/client.go) — `GetFieldForDevice` acceptă `tenantID`; filtru Flux opțional `r.tenant_id == "<tid>" or not exists r.tenant_id` (backward-compatible cu date legacy fără tag).
+
+### 8.8 Tag tenant_id pe scrierile MQTT → Influx (1.8) — ✅ DONE
+
+- [cmd/main.go](go-iot-platform/cmd/main.go) `handleMessage`:
+  - Lookup `tenant_id` în lista de device-uri din Django.
+  - `tenantTag = strconv.FormatInt(d.TenantID, 10)` sau `"unassigned"` pentru device-uri necunoscute.
+  - Toate cele 7 puncte Influx (Shelly emeter/relay, NousAT STATE/SENSOR, Zigbee, generic JSON, generic plain) primesc tag-ul `tenant_id`.
+
+**Datorie tehnică cunoscută** (de adresat în Faza 2):
+- `GetAllDevices()` apelat per mesaj MQTT — bottleneck până la cache Redis (Faza 2.4).
+
+### 8.9 Fix post-deploy: service account bypass tenant membership
+
+După repornirea Go-ului în producție, login-ul `iot-ingest` întorcea 400 ("no active tenant"). Cauză: 1.3 cerea membership pentru orice user. Service accounts sunt cross-tenant by design și nu au membership.
+
+Fix în [clients/tokens.py](django-bakend/clients/tokens.py): user cu perm `clients.view_device` (non-superuser) login-ează direct, fără verificare de tenant; token-ul emis nu are claims `tenant_id`/`role`. Test: `test_service_account_login_without_membership`.
+
+---
+
+## 9. Rezultatele detaliate ale testelor — Faza 1
+
+### 9.1 Django — pytest (46 passed)
+
+```text
+============================= test session starts =============================
+platform win32 -- Python 3.12.6, pytest-8.3.4, pluggy-1.6.0
+django: version: 5.2.4, settings: django_backend.settings_test (from ini)
+collected 46 items
+
+clients/tests/test_device_tenancy.py::test_same_serial_in_different_tenants_allowed   PASSED
+clients/tests/test_device_tenancy.py::test_same_serial_in_same_tenant_rejected        PASSED
+clients/tests/test_device_tenancy.py::test_tenant_required                            PASSED
+clients/tests/test_device_tenancy.py::test_legacy_tenant_exists_after_migrations      PASSED
+clients/tests/test_device_tenancy.py::test_legacy_membership_created_for_existing_users PASSED
+clients/tests/test_device_tenancy.py::test_protect_on_tenant_delete                   PASSED
+clients/tests/test_devices.py::test_user_sees_devices_in_own_tenant                   PASSED
+clients/tests/test_devices.py::test_user_does_not_see_other_tenant_devices            PASSED
+clients/tests/test_devices.py::test_superuser_sees_all_devices                        PASSED
+clients/tests/test_devices.py::test_service_account_sees_all_devices                  PASSED
+clients/tests/test_devices.py::test_filter_by_username_query_param                    PASSED
+clients/tests/test_devices.py::test_filter_by_tenant_query_param_for_service_account  PASSED
+clients/tests/test_devices.py::test_device_create_uses_tenant_from_jwt                PASSED
+clients/tests/test_devices.py::test_anonymous_request_rejected                        PASSED
+clients/tests/test_login.py::test_login_no_membership_rejected                        PASSED
+clients/tests/test_login.py::test_login_single_membership_implicit                    PASSED
+clients/tests/test_login.py::test_login_multiple_memberships_requires_slug            PASSED
+clients/tests/test_login.py::test_login_multiple_memberships_with_slug                PASSED
+clients/tests/test_login.py::test_login_unknown_tenant_slug_rejected                  PASSED
+clients/tests/test_login.py::test_login_suspended_tenant_excluded                     PASSED
+clients/tests/test_login.py::test_service_account_login_without_membership            PASSED
+clients/tests/test_login.py::test_refresh_token_carries_tenant_claims                 PASSED
+tenants/tests/test_models.py::test_tenant_defaults                                    PASSED
+tenants/tests/test_models.py::test_tenant_str                                         PASSED
+tenants/tests/test_models.py::test_tenant_slug_unique                                 PASSED
+tenants/tests/test_models.py::test_membership_default_role                            PASSED
+tenants/tests/test_models.py::test_membership_unique_user_tenant                      PASSED
+tenants/tests/test_models.py::test_user_can_belong_to_multiple_tenants                PASSED
+tenants/tests/test_models.py::test_tenant_can_have_multiple_members                   PASSED
+tenants/tests/test_models.py::test_cascade_delete_tenant_removes_memberships          PASSED
+tenants/tests/test_models.py::test_cascade_delete_user_removes_memberships            PASSED
+tenants/tests/test_permissions.py::test_all_roles_can_read[OWNER..INSTALLER]          PASSED  (×5)
+tenants/tests/test_permissions.py::test_create_device_by_role[OWNER..VIEWER]          PASSED  (×5)
+tenants/tests/test_permissions.py::test_delete_device_by_role[OWNER..INSTALLER]       PASSED  (×5)
+
+============================= 46 passed in 202.44s ============================
+```
+
+#### 9.1.1 Acoperire pe fișier de test
+
+| Fișier | # teste | Acoperă |
+|--------|---------|---------|
+| [clients/tests/test_device_tenancy.py](django-bakend/clients/tests/test_device_tenancy.py) | 6 | model Device tenant-scoped: serial unic per tenant; `tenant_id` NOT NULL după 0006; legacy tenant și backfill; `PROTECT` la delete |
+| [clients/tests/test_devices.py](django-bakend/clients/tests/test_devices.py) | 8 | `DeviceViewSet`: izolare per-tenant (alice nu vede device-urile lui bob); superuser și service account cross-tenant; filtre `?username=` și `?tenant=`; spoof prevention la POST |
+| [clients/tests/test_login.py](django-bakend/clients/tests/test_login.py) | 8 | login flow: 0/1/multi memberships; tenant suspended exclus; refresh token carry; **service account bypass** (post-fix) |
+| [tenants/tests/test_models.py](django-bakend/tenants/tests/test_models.py) | 9 | Tenant defaults, slug unique, Membership unicity, CASCADE delete, multi-tenant per user / multi-user per tenant |
+| [tenants/tests/test_permissions.py](django-bakend/tenants/tests/test_permissions.py) | 15 | `TenantRolePermission` parametrizat pe (rol × metodă HTTP): read all, write OWNER+ADMIN+OPERATOR+INSTALLER, delete OWNER+ADMIN |
+
+#### 9.1.2 Detaliu test pe areas critice
+
+**Izolare cross-tenant** ([test_devices.py](django-bakend/clients/tests/test_devices.py)):
+
+| Test | Scenariu | Verifică |
+|------|----------|----------|
+| `test_user_sees_devices_in_own_tenant` | alice e în Acme, vede ACME-001 | Filtrare implicită pe tenant_id din JWT |
+| `test_user_does_not_see_other_tenant_devices` | bob e în Globex, vede doar GLOBEX-001 | Niciun leak cross-tenant |
+| `test_superuser_sees_all_devices` | superuser → 2 device-uri | Bypass tenant filter |
+| `test_service_account_sees_all_devices` | iot-ingest cu `view_device` perm → 2 device-uri | Bypass pentru ingest |
+| `test_device_create_uses_tenant_from_jwt` | alice POST cu tenant=globex.id | `perform_create` suprascrie cu tenant din JWT (Acme) |
+
+**RBAC parametrizat** ([test_permissions.py](django-bakend/tenants/tests/test_permissions.py)):
+
+| Rol | GET | POST | DELETE |
+|-----|-----|------|--------|
+| OWNER | 200 | 201 | 204 |
+| ADMIN | 200 | 201 | 204 |
+| OPERATOR | 200 | 201 | **403** |
+| INSTALLER | 200 | 201 | **403** |
+| VIEWER | 200 | **403** | **403** |
+
+**Login flow** ([test_login.py](django-bakend/clients/tests/test_login.py)):
+
+| Test | Așteptat |
+|------|----------|
+| `test_login_no_membership_rejected` | 400 + mesaj "no active tenant" |
+| `test_login_single_membership_implicit` | 200, JWT conține `tenant_id`, `tenant_slug`, `role`, `username`, `iss=django` |
+| `test_login_multiple_memberships_requires_slug` | 400 + lista de slug-uri eligibile |
+| `test_login_multiple_memberships_with_slug` | 200, claim-urile reflectă tenantul ales |
+| `test_login_unknown_tenant_slug_rejected` | 400 (user nu e membru) |
+| `test_login_suspended_tenant_excluded` | 400 (tenant suspended → membership ineligibil) |
+| `test_service_account_login_without_membership` | 200, **fără** `tenant_id` în token (service account bypass) |
+| `test_refresh_token_carries_tenant_claims` | refresh token conține și el claim-urile tenant |
+
+### 9.2 Go — `go test ./...`
+
+```text
+=== RUN   TestGetTokenContext
+=== RUN   TestGetTokenContext/valid_with_tenant
+=== RUN   TestGetTokenContext/missing_tenant_id
+=== RUN   TestGetTokenContext/missing_header
+=== RUN   TestGetTokenContext/wrong_scheme
+=== RUN   TestGetTokenContext/bad_signature
+=== RUN   TestGetTokenContext/expired
+=== RUN   TestGetTokenContext/username_missing
+--- PASS: TestGetTokenContext (0.00s)
+    --- PASS: TestGetTokenContext/valid_with_tenant (0.00s)
+    --- PASS: TestGetTokenContext/missing_tenant_id (0.00s)
+    --- PASS: TestGetTokenContext/missing_header   (0.00s)
+    --- PASS: TestGetTokenContext/wrong_scheme     (0.00s)
+    --- PASS: TestGetTokenContext/bad_signature    (0.00s)
+    --- PASS: TestGetTokenContext/expired          (0.00s)
+    --- PASS: TestGetTokenContext/username_missing (0.00s)
+PASS
+ok      go-iot-platform/internal/api          1.470s
+=== RUN   TestRangeRegex
+--- PASS: TestRangeRegex (0.00s)
+PASS
+ok      go-iot-platform/internal/influx       1.305s
+```
+
+| Test | Acoperire |
+|------|-----------|
+| `TestGetTokenContext/valid_with_tenant` | JWT cu `tenant_id`, `tenant_slug`, `role` decodat corect în `tokenContext` |
+| `TestGetTokenContext/missing_tenant_id` | Tenant absent → eroare (1.7 cere tenant_id mandatory pe endpoint-uri end-user) |
+| `TestGetTokenContext/missing_header` | Lipsa header `Authorization` → eroare |
+| `TestGetTokenContext/wrong_scheme` | `Basic` în loc de `Bearer` → eroare |
+| `TestGetTokenContext/bad_signature` | Token semnat cu alt secret → invalid |
+| `TestGetTokenContext/expired` | `exp` în trecut → invalid |
+| `TestGetTokenContext/username_missing` | Token fără claim `username` → eroare |
+| `TestRangeRegex` | Pattern `^-?\d+[smhd]$` (din 0.6) — neschimbat |
+
+### 9.3 `go vet ./...` și `go build ./...`
+
+Curate, fără avertismente. Build reușit pentru toate pachetele.
+
+---
+
+## 10. Deploy Faza 1 — operațiuni efectuate pe MySQL real (2026-04-27)
+
+### 10.1 Migrare DB
+
+```text
+$ python manage.py migrate
+Operations to perform:
+  Apply all migrations: admin, auth, clients, contenttypes, sessions, tenants
+Running migrations:
+  Applying tenants.0001_initial... OK
+  Applying clients.0004_add_tenant_to_device... OK
+  Applying clients.0005_populate_legacy_tenant... OK
+  Applying clients.0006_finalize_tenant_constraints... OK
+```
+
+### 10.2 Verificare post-migrate
+
+| Verificare | Rezultat |
+|------------|----------|
+| `tenants_tenant` | 1 row: `(1, 'Legacy Tenant', 'legacy', 'free', 'active')` |
+| `tenants_membership` | 1 row: `(user_id=1, tenant_id=1, role=OWNER)` |
+| Device-uri cu `tenant_id IS NULL` | **0** (toate cele 3 atribuite) |
+| Device-uri total | 3 (neschimbat) |
+| Sample devices | toate 3 cu `tenant_id=1` (legacy) |
+
+### 10.3 Provisioning service account
+
+```text
+$ python manage.py create_service_user --password "<DJANGO_SERVICE_PASS>"
+Created service user 'iot-ingest' with permissions: view_device, add_device
+```
+
+### 10.4 Validare end-to-end
+
+Confirmat de utilizator: după repornirea Django (cu codul nou inclusiv fix-ul `5532f78`) și a serviciului Go, mesajele MQTT sunt scrise în Influx cu tag-ul `tenant_id="1"`.
+
+---
+
+## 11. Definition of Done — Faza 1
+
+| Criteriu din [plan.md §Faza 1](plan.md) | Status |
+|------------------------------------------|--------|
+| **1.1** Tenanți și membership-uri se pot crea din admin; testele pentru CRUD trec | ✅ |
+| **1.2** Toate device-urile existente au `tenant_id` populat; unique compus activ | ✅ (verificat pe MySQL real) |
+| **1.3** Token decodat conține `tenant_id`, `tenant_slug`, `role`; teste verzi | ✅ |
+| **1.4** Un user din tenantul A nu poate vedea device-urile tenantului B prin API | ✅ (admin Django rămâne deferat — vezi §12) |
+| **1.5** VIEWER nu poate face POST/DELETE pe `/api/devices/` | ✅ (parametrizat pe 5 roluri × 3 metode) |
+| **1.6** Request-ul ajunge la upstream cu `X-Tenant-Id` setat corect | ✅ (config Kong; verificat operațional după `kong reload`) |
+| **1.7** Request cu token tenant A pe device tenant B → 403 | ✅ (filtrare în Django + verificare în Go) |
+| **1.8** Orice punct nou în Influx are tag `tenant_id` | ✅ (verificat în producție după restart Go) |
+
+---
+
+## 12. Datorie tehnică cunoscută (deferată Fazei 2)
+
+1. **GetAllDevices() apelat per mesaj MQTT** ([cmd/main.go:164](go-iot-platform/cmd/main.go#L164)) — HTTP roundtrip pe fiecare mesaj. Faza 2.4 introduce cache Redis device→tenant cu invalidare push.
+2. **Filtrul Flux acceptă date fără tenant_id** ([internal/influx/client.go](go-iot-platform/internal/influx/client.go)) — `or not exists r.tenant_id` e tranzitoriu pentru date pre-1.8. După ce toate datele relevante au tag, filtrul se poate strânge.
+3. **Admin Django nu e încă tenant-aware** — folosește session auth, nu JWT, deci nu beneficiază de `TenantMiddleware`. Filtrarea curentă e per-user (pre-existentă), nu per-tenant. De rezolvat cu un mecanism separat (e.g., selecție de tenant stocată în session).
+4. **MQTT broker single-instance, abonare la `#`** — neschimbat de Faza 1. Faza 2.1–2.3 trece pe EMQX clusterizat cu shared subscriptions.
+5. **Influx WriteAPIBlocking** — neschimbat. Faza 2.5 trece pe `WriteAPI` async cu batch.
+
+---
+
+## 13. Concluzie generală (Faza 0 + Faza 1)
+
+Platforma a făcut tranziția de la **MVP single-tenant** (Faza 0 a stabilizat ce era) la **fundație multi-tenant funcțională** (Faza 1). Modelul de date, JWT-ul, autorizarea, și pipeline-ul de telemetrie sunt acum tenant-aware end-to-end. Suite-ul de teste a crescut de 11× (4 → 46 + 8 sub-teste Go) și acoperă explicit izolarea cross-tenant și RBAC.
+
+Datele reale (3 device-uri, 1 user, 0 membership-uri inițial) au fost migrate fără pierderi în tenantul `legacy`. Sistemul a fost validat operațional: utilizatorul confirmă că Go-ul ingestă date după redeploy.
+
+**Pas următor:** Faza 2 — ingest scalabil (EMQX + shared subscriptions, MQTT bridge pentru device-uri legacy, cache Redis device→tenant, batch writes Influx, opțional buffer Kafka/NATS).
