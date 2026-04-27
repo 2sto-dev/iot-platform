@@ -24,6 +24,7 @@ import (
 	"go-iot-platform/internal/api"
 	"go-iot-platform/internal/django"
 	"go-iot-platform/internal/influx"
+	"go-iot-platform/internal/topics"
 )
 
 var titleCaser = cases.Title(language.Und)
@@ -155,24 +156,55 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 
 	log.Printf("📥 MQTT Message: topic=%s payload=%s", topic, string(payload))
 
-	parts := strings.Split(topic, "/")
-	if len(parts) < 2 {
+	// Parse topic: dacă începe cu "tenants/", schema nouă cu validare strictă;
+	// altfel legacy → continuăm flow-ul existent (lookup device→tenant via Django).
+	parsed, err := topics.Parse(topic)
+	if err != nil {
+		log.Printf("⛔ TOPIC INVALID — DROP: %v", err)
 		return
 	}
-	deviceID := parts[1]
+
+	var deviceID string
+	if parsed.IsLegacy {
+		deviceID = topics.LegacyDeviceID(topic)
+	} else {
+		deviceID = parsed.DeviceID
+	}
+	// #7 enforcement: device_id e obligatoriu — fără el nu putem tag-a punctul
+	if deviceID == "" {
+		log.Printf("⛔ EMPTY device_id (topic=%s) — DROP", topic)
+		return
+	}
 
 	devices, _ := django.GetAllDevices()
 	tenantTag := "unassigned"
+	var deviceTenantID int64
 	found := false
 	for _, d := range devices {
 		if d.Serial == deviceID {
 			found = true
+			deviceTenantID = d.TenantID
 			if d.TenantID > 0 {
 				tenantTag = strconv.FormatInt(d.TenantID, 10)
 			}
 			break
 		}
 	}
+
+	// #4 Validare device ↔ tenant: dacă topic-ul declară un tenant explicit (schema nouă),
+	// trebuie să corespundă cu tenantul real al device-ului din Django. Mismatch → DROP.
+	if !parsed.IsLegacy {
+		if !found {
+			log.Printf("⛔ Device %s nu există în Django (topic %s) — DROP (schema nouă cere device înregistrat)", deviceID, topic)
+			return
+		}
+		if deviceTenantID != parsed.TenantID {
+			log.Printf("⛔ DEVICE-TENANT MISMATCH device=%s topic_tenant=%d device_tenant=%d — DROP",
+				deviceID, parsed.TenantID, deviceTenantID)
+			return
+		}
+	}
+
 	if !found {
 		log.Printf("⚠️ Device necunoscut %s (topic %s) — telemetrie marcată tenant_id=unassigned, NU se mai auto-înregistrează", deviceID, topic)
 	}
@@ -185,7 +217,8 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 			log.Printf("❌ Eroare conversie la float pentru %s: %v", valStr, err)
 			return
 		}
-		field := parts[len(parts)-1]
+		topicParts := strings.Split(topic, "/")
+		field := topicParts[len(topicParts)-1]
 		p := influxdb2.NewPoint("devices",
 			map[string]string{"device": deviceID, "source": "shelly", "type": "power_meter", "tenant_id": tenantTag},
 			map[string]interface{}{titleCaser.String(field): value},
