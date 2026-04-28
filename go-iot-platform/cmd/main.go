@@ -18,16 +18,29 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
 	influxdb2api "github.com/influxdata/influxdb-client-go/v2/api"
+	"github.com/influxdata/influxdb-client-go/v2/api/write"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
 	"go-iot-platform/internal/api"
+	"go-iot-platform/internal/buffer"
 	"go-iot-platform/internal/django"
 	"go-iot-platform/internal/influx"
+	"go-iot-platform/internal/logging"
+	"go-iot-platform/internal/ratelimit"
 	"go-iot-platform/internal/topics"
 )
 
-var titleCaser = cases.Title(language.Und)
+var (
+	titleCaser = cases.Title(language.Und)
+
+	// Rate limit: 10 msg/s per device (burst 20), 200 msg/s per tenant (burst 400).
+	// Tunable din env în viitor; momentan hardcodat ca să rămână simplu.
+	limiter = ratelimit.New(10, 20, 200, 400)
+
+	// Fallback fișier când Influx pică. Path absolut → vezi setupBuffer().
+	influxBuffer *buffer.FileBuffer
+)
 
 func main() {
 	if _, err := os.Stat("logs"); os.IsNotExist(err) {
@@ -47,6 +60,13 @@ func main() {
 	influxClient := influxdb2.NewClient(influx.URL, influx.Token)
 	defer influxClient.Close()
 	writeAPI := influxClient.WriteAPIBlocking(influx.Org, influx.Bucket)
+
+	if buf, err := buffer.New("logs/influx_fallback.log"); err != nil {
+		log.Printf("⚠️ Buffer fallback unavailable: %v (Influx errors will only be logged)", err)
+	} else {
+		influxBuffer = buf
+		defer influxBuffer.Close()
+	}
 
 	go startMQTTSubscriber(ctx, writeAPI)
 
@@ -150,17 +170,30 @@ type SensorMessage struct {
 	ENERGY EnergyData `json:"ENERGY"`
 }
 
+// writePoint scrie un punct în Influx cu fallback la fișier dacă scrierea eșuează.
+// Loghează result-ul structurat (level=info la succes, level=error la eșec).
+func writePoint(p *write.Point, writeAPI influxdb2api.WriteAPIBlocking, topic string, payload []byte, fields logging.Fields) {
+	if err := writeAPI.WritePoint(context.Background(), p); err != nil {
+		fields["error"] = err.Error()
+		logging.Error("influx write failed", fields)
+		if bufErr := influxBuffer.Append(topic, payload, err); bufErr != nil {
+			logging.Error("buffer fallback failed", logging.Fields{"error": bufErr.Error()})
+		}
+		return
+	}
+	logging.Info("influx write ok", fields)
+}
+
 func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 	topic := msg.Topic()
 	payload := msg.Payload()
 
-	log.Printf("📥 MQTT Message: topic=%s payload=%s", topic, string(payload))
+	logging.Info("mqtt message received", logging.Fields{"topic": topic, "size": len(payload)})
 
-	// Parse topic: dacă începe cu "tenants/", schema nouă cu validare strictă;
-	// altfel legacy → continuăm flow-ul existent (lookup device→tenant via Django).
+	// Parse topic
 	parsed, err := topics.Parse(topic)
 	if err != nil {
-		log.Printf("⛔ TOPIC INVALID — DROP: %v", err)
+		logging.Drop("topic invalid", logging.Fields{"topic": topic, "error": err.Error()})
 		return
 	}
 
@@ -170,9 +203,8 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 	} else {
 		deviceID = parsed.DeviceID
 	}
-	// #7 enforcement: device_id e obligatoriu — fără el nu putem tag-a punctul
 	if deviceID == "" {
-		log.Printf("⛔ EMPTY device_id (topic=%s) — DROP", topic)
+		logging.Drop("empty device_id", logging.Fields{"topic": topic})
 		return
 	}
 
@@ -191,22 +223,37 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 		}
 	}
 
-	// #4 Validare device ↔ tenant: dacă topic-ul declară un tenant explicit (schema nouă),
-	// trebuie să corespundă cu tenantul real al device-ului din Django. Mismatch → DROP.
+	// #4 Validare device ↔ tenant pentru schema nouă
 	if !parsed.IsLegacy {
 		if !found {
-			log.Printf("⛔ Device %s nu există în Django (topic %s) — DROP (schema nouă cere device înregistrat)", deviceID, topic)
+			logging.Drop("unknown device on tenant-scoped topic", logging.Fields{
+				"topic": topic, "device_id": deviceID, "tenant_id": parsed.TenantID,
+			})
 			return
 		}
 		if deviceTenantID != parsed.TenantID {
-			log.Printf("⛔ DEVICE-TENANT MISMATCH device=%s topic_tenant=%d device_tenant=%d — DROP",
-				deviceID, parsed.TenantID, deviceTenantID)
+			logging.Drop("device-tenant mismatch", logging.Fields{
+				"device_id":     deviceID,
+				"topic_tenant":  parsed.TenantID,
+				"device_tenant": deviceTenantID,
+				"topic":         topic,
+			})
 			return
 		}
 	}
 
+	// #10 Rate limit per device + per tenant
+	if !limiter.Allow(deviceID, tenantTag) {
+		logging.Drop("rate limited", logging.Fields{
+			"device_id": deviceID, "tenant_id": tenantTag, "topic": topic,
+		})
+		return
+	}
+
 	if !found {
-		log.Printf("⚠️ Device necunoscut %s (topic %s) — telemetrie marcată tenant_id=unassigned, NU se mai auto-înregistrează", deviceID, topic)
+		logging.Warn("unknown device — tenant=unassigned", logging.Fields{
+			"device_id": deviceID, "topic": topic,
+		})
 	}
 
 	// Scriere în Influx (cu loguri pe fiecare caz)
@@ -223,8 +270,9 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 			map[string]string{"device": deviceID, "source": "shelly", "type": "power_meter", "tenant_id": tenantTag},
 			map[string]interface{}{titleCaser.String(field): value},
 			time.Now())
-		_ = writeAPI.WritePoint(context.Background(), p)
-		log.Printf("📊 Scris în InfluxDB (Shelly %s): %.2f", field, value)
+		writePoint(p, writeAPI, topic, payload, logging.Fields{
+			"source": "shelly", "field": field, "value": value, "device_id": deviceID, "tenant_id": tenantTag,
+		})
 
 	} else if strings.Contains(topic, "/relay/0") {
 		valStr := strings.ToLower(string(payload))
@@ -236,26 +284,28 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 			map[string]string{"device": deviceID, "source": "shelly", "type": "relay", "tenant_id": tenantTag},
 			map[string]interface{}{"state": state},
 			time.Now())
-		_ = writeAPI.WritePoint(context.Background(), p)
-		log.Printf("📊 Scris în InfluxDB (Shelly relay state): %d", state)
+		writePoint(p, writeAPI, topic, payload, logging.Fields{
+			"source": "shelly", "type": "relay", "state": state, "device_id": deviceID, "tenant_id": tenantTag,
+		})
 
 	} else if strings.HasSuffix(topic, "/STATE") {
 		var state StateMessage
 		if err := json.Unmarshal(payload, &state); err != nil {
-			log.Printf("❌ Eroare parsare STATE: %v", err)
+			logging.Drop("parse STATE failed", logging.Fields{"error": err.Error(), "topic": topic, "device_id": deviceID})
 			return
 		}
 		p := influxdb2.NewPoint("devices",
 			map[string]string{"device": deviceID, "source": "nousat", "type": "state", "tenant_id": tenantTag},
 			map[string]interface{}{"POWER": state.POWER, "RSSI": state.RSSI},
 			time.Now())
-		_ = writeAPI.WritePoint(context.Background(), p)
-		log.Printf("📊 Scris în InfluxDB (NousAT STATE): %+v", state)
+		writePoint(p, writeAPI, topic, payload, logging.Fields{
+			"source": "nousat", "type": "state", "device_id": deviceID, "tenant_id": tenantTag,
+		})
 
 	} else if strings.HasSuffix(topic, "/SENSOR") {
 		var sensor SensorMessage
 		if err := json.Unmarshal(payload, &sensor); err != nil {
-			log.Printf("❌ Eroare parsare SENSOR: %v", err)
+			logging.Drop("parse SENSOR failed", logging.Fields{"error": err.Error(), "topic": topic, "device_id": deviceID})
 			return
 		}
 		t, err := time.Parse(time.RFC3339, sensor.Time)
@@ -271,21 +321,23 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 				"Total":   sensor.ENERGY.Total,
 			},
 			t)
-		_ = writeAPI.WritePoint(context.Background(), p)
-		log.Printf("📊 Scris în InfluxDB (NousAT SENSOR): %+v", sensor.ENERGY)
+		writePoint(p, writeAPI, topic, payload, logging.Fields{
+			"source": "nousat", "type": "energy", "device_id": deviceID, "tenant_id": tenantTag,
+		})
 
 	} else if strings.HasPrefix(topic, "zigbee2mqtt/") {
 		var data map[string]interface{}
 		if err := json.Unmarshal(payload, &data); err != nil {
-			log.Printf("❌ Eroare parsare Zigbee payload: %v", err)
+			logging.Drop("parse zigbee2mqtt failed", logging.Fields{"error": err.Error(), "topic": topic, "device_id": deviceID})
 			return
 		}
 		p := influxdb2.NewPoint("devices",
 			map[string]string{"device": deviceID, "source": "zigbee2mqtt", "type": "sensor", "tenant_id": tenantTag},
 			data,
 			time.Now())
-		_ = writeAPI.WritePoint(context.Background(), p)
-		log.Printf("📊 Scris în InfluxDB (Zigbee2MQTT %s): %+v", deviceID, data)
+		writePoint(p, writeAPI, topic, payload, logging.Fields{
+			"source": "zigbee2mqtt", "type": "sensor", "device_id": deviceID, "tenant_id": tenantTag,
+		})
 
 	} else {
 		var data map[string]interface{}
@@ -294,8 +346,9 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 				map[string]string{"device": deviceID, "source": "generic", "type": "auto_detected", "tenant_id": tenantTag},
 				data,
 				time.Now())
-			_ = writeAPI.WritePoint(context.Background(), p)
-			log.Printf("📊 Scris în InfluxDB (Generic JSON %s): %+v", deviceID, data)
+			writePoint(p, writeAPI, topic, payload, logging.Fields{
+				"source": "generic", "type": "auto_detected", "device_id": deviceID, "tenant_id": tenantTag,
+			})
 		} else {
 			valStr := string(payload)
 			var val interface{}
@@ -308,8 +361,9 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 				map[string]string{"device": deviceID, "source": "generic", "type": "auto_detected", "tenant_id": tenantTag},
 				map[string]interface{}{"value": val},
 				time.Now())
-			_ = writeAPI.WritePoint(context.Background(), p)
-			log.Printf("📊 Scris în InfluxDB (Generic simplu %s): %v", deviceID, val)
+			writePoint(p, writeAPI, topic, payload, logging.Fields{
+				"source": "generic", "type": "auto_detected_simple", "device_id": deviceID, "tenant_id": tenantTag,
+			})
 		}
 	}
 }
