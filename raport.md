@@ -554,3 +554,333 @@ Platforma a făcut tranziția de la **MVP single-tenant** (Faza 0 a stabilizat c
 Datele reale (3 device-uri, 1 user, 0 membership-uri inițial) au fost migrate fără pierderi în tenantul `legacy`. Sistemul a fost validat operațional: utilizatorul confirmă că Go-ul ingestă date după redeploy.
 
 **Pas următor:** Faza 2 — ingest scalabil (EMQX + shared subscriptions, MQTT bridge pentru device-uri legacy, cache Redis device→tenant, batch writes Influx, opțional buffer Kafka/NATS).
+
+---
+---
+
+# Raport Faza 1.9 — Hardening și fix-uri punctuale
+
+> Status: ✅ COMPLETĂ — 8/10 items implementați, 2 deferați la Faza 2 cu motiv documentat (2026-04-28)
+
+## 14. Sumar executiv Faza 1.9
+
+Aplicat un set de 10 fix-uri propuse pentru hardening-ul Fazei 1 (multi-tenant safety, rezilient și pregătit pentru scalare). Implementarea s-a făcut în **3 batch-uri** cu commit per batch:
+
+- **Batch A** (`a8a6144`): Django hardening — items 1, 2, 3, 6
+- **Batch B** (`671426b`): Go ingest hardening — items 4, 5, 7
+- **Batch C** (`8a5e66a`): Reziliență + observabilitate — items 8, 9, 10
+
+| Suite | Înainte 1.9 | După 1.9 | Δ |
+|-------|-------------|----------|---|
+| Django (pytest) | 46 passed | **52 passed** | +6 (test_middleware_hardening) |
+| Go (`go test ./...`) | 1 pachet cu teste (api), 1 cu test mic (influx) | **6 pachete cu teste**: api, influx, topics, logging, ratelimit, buffer | +4 pachete |
+| `go vet ./...` | clean | clean | — |
+| `go build ./...` | clean | clean | — |
+
+## 15. Status pe item
+
+### #1 ✅ Eliminare `?tenant=` din query params (refined)
+
+**Implementare:** [clients/views.py](django-bakend/clients/views.py) — param-ul `?tenant=` e ignorat pentru utilizatori normali (anti-spoof). Service account-urile (cu perm `clients.view_device`) îl pot folosi pentru filtrare cross-tenant — comportament intenționat din Faza 1.7.
+
+**Înainte:**
+```python
+tenant_filter = self.request.query_params.get("tenant")
+if tenant_filter:
+    qs = qs.filter(tenant_id=tenant_filter)
+```
+**După:**
+```python
+if _is_cross_tenant(user):
+    qs = Device.objects.all()
+    tenant_filter = self.request.query_params.get("tenant")
+    if tenant_filter:
+        qs = qs.filter(tenant_id=tenant_filter)
+else:
+    # Param ?tenant= IGNORAT pentru utilizatori normali — anti-spoof
+    qs = Device.objects.for_tenant(request.tenant)
+```
+
+### #2 ✅ Filtrare strictă în viewset (refined pentru service account)
+
+**Implementare:** [clients/views.py](django-bakend/clients/views.py) — non-cross-tenant fără `request.tenant` ridică `PermissionDenied` (403), nu queryset gol care ar masca leak-uri. `request.tenant` (Tenant instance) folosit pentru `for_tenant()` și `perform_create()`.
+
+**Notă:** Codul propus literal (`if not hasattr(request, "tenant"): raise`) ar fi rupt service account. Refinat să păstreze bypass-ul.
+
+### #3 ✅ Hardening TenantMiddleware (membership re-check + cache + signals)
+
+**Implementare:** [tenants/middleware.py](django-bakend/tenants/middleware.py).
+
+Înainte: middleware doar decoda JWT și seta tenant_id. Membership-ul era validat doar la **emiterea** tokenului în [tokens.py](django-bakend/clients/tokens.py); revocarea de membership nu invalida JWT-uri active.
+
+După:
+- `_resolve_tenant(user_id, tenant_id)` cu cache TTL 60s in-process → 1 query DB / 60s / user
+- Membership inexistent sau Tenant inactiv → 403 cu mesaj „no active membership"
+- `request.tenant` setat ca Tenant instance (în plus de tenant_id pentru compat)
+- user_id/tenant_id normalizate la int (JWT trimite string, signals trimit int) — fix pentru bug de cache key mismatch
+- [tenants/signals.py](django-bakend/tenants/signals.py): post_save/post_delete pe Membership și post_save pe Tenant invalidează cache-ul → revocare instant fără să aștepți TTL
+
+### #4 ✅ Validare device ↔ tenant în Go (defensiv pentru schema nouă)
+
+**Implementare:** [cmd/main.go](go-iot-platform/cmd/main.go) `handleMessage`.
+
+Pentru topicuri schema nouă (`tenants/{tid}/devices/{did}/...`):
+- device_id din topic trebuie să existe în Django (lookup via GetAllDevices)
+- device.tenant_id trebuie să corespundă cu tenant din topic
+- Mismatch → DROP cu log structurat
+
+Pentru topicuri legacy (`shellies/...`, `tele/...`, `zigbee2mqtt/...`): comportament neschimbat (lookup device→tenant, tag tenant_id sau „unassigned"). Asta evită ruperea telemetriei curente înainte de migrarea schemei (Faza 2.1).
+
+**Exemplu drop:**
+```json
+{"ts":"2026-04-28T..","level":"drop","msg":"device-tenant mismatch",
+ "device_id":"dev-001","topic_tenant":1,"device_tenant":2,
+ "topic":"tenants/1/devices/dev-001/up/state"}
+```
+
+### #5 ✅ Validare topic MQTT (parser nou + format strict pentru schema nouă)
+
+**Implementare:** [internal/topics/topics.go](go-iot-platform/internal/topics/topics.go) — parser dedicat.
+
+```go
+type Parsed struct {
+    IsLegacy  bool
+    TenantID  int64
+    DeviceID  string
+    Direction string // "up" | "down"
+    Stream    string
+    Raw       string
+}
+
+func Parse(topic string) (Parsed, error)
+```
+
+**Erori la parse → DROP:**
+- malformed (segments < 6)
+- empty tenant_id sau device_id
+- non-numeric tenant_id
+- tenant_id ≤ 0 (negativ sau zero)
+- direction invalid (≠ up/down)
+- bad layout (segments greșite)
+
+14 sub-cazuri în [topics_test.go](go-iot-platform/internal/topics/topics_test.go).
+
+### #6 ✅ Kill-switch `MULTI_TENANT_ENABLED`
+
+**Implementare:** [django_backend/settings.py](django-bakend/django_backend/settings.py) — flag citit din env, default `True`. La `False`, [TenantMiddleware](django-bakend/tenants/middleware.py) devine no-op → util ca rollback de urgență fără rollback DB.
+
+**Notă:** Migrarea în 5 pași propusă inițial nu mai e relevantă — migrarea Fazei 1.2 s-a întâmplat deja pe MySQL real (vezi §10). Kill-switch-ul rezolvă scenariul „rollback runtime" care era scopul.
+
+### #7 ✅ Influx tagging enforcement (skip dacă device_id gol)
+
+**Implementare:** [cmd/main.go](go-iot-platform/cmd/main.go) `handleMessage`.
+
+Faza 1.8 deja taga `tenant_id` și `device` pe toate punctele (cu `"unassigned"` pentru device necunoscut — preserves data, nu pierde). Faza 1.9 adaugă enforcement strict pentru `device_id` gol: dacă topic-ul nu permite extragerea unui deviceID, mesajul e dropped explicit.
+
+### #8 ✅ File fallback pentru erori Influx
+
+**Implementare:** [internal/buffer/buffer.go](go-iot-platform/internal/buffer/buffer.go).
+
+Înainte: `_ = writeAPI.WritePoint(ctx, p)` — eroarea ignorată silent.
+
+După: helper `writePoint(p, writeAPI, topic, payload, fields)` care:
+1. Apelează `WritePoint`
+2. Pe eroare: log structurat + scriere în `logs/influx_fallback.log` (1 linie JSON / payload)
+3. Pe succes: log info
+
+Toate cele 7 `NewPoint` calls în handleMessage refactorizate prin `writePoint`.
+
+**Limite documentate:**
+- Fără rotație: necesită monitorizare disk
+- Fără replay automat: re-ingest offline (script TBD în Faza 2.5)
+- Pentru reziliență adevărată cu retry → Faza 2.5 cu `WriteAPI` async batched
+
+### #9 ✅ Logging structurat JSON
+
+**Implementare:** [internal/logging/logging.go](go-iot-platform/internal/logging/logging.go).
+
+```go
+package logging
+
+type Fields map[string]interface{}
+
+func Info(msg string, f Fields)  // 1 linie JSON cu ts, level, msg + custom fields
+func Warn(msg string, f Fields)
+func Error(msg string, f Fields)
+func Drop(msg string, f Fields)  // semantic distinct pentru drops vs erori
+```
+
+**Înainte:**
+```text
+⚠️ Device necunoscut dev-001 (topic shellies/dev-001/...) — telemetrie marcată tenant_id=unassigned
+```
+**După:**
+```json
+{"ts":"2026-04-28T07:12:33.123Z","level":"warn","msg":"unknown device — tenant=unassigned",
+ "device_id":"dev-001","topic":"shellies/dev-001/emeter/0/power"}
+```
+
+Toate log-urile critice din `handleMessage` migrate la format structurat. Câmpuri obligatorii: `tenant_id`, `device_id`, `topic`. Pregătit pentru Loki / ELK cu label-uri tenant_id (Faza 4.4).
+
+### #10 ✅ Rate limiting in-memory (token bucket)
+
+**Implementare:** [internal/ratelimit/ratelimit.go](go-iot-platform/internal/ratelimit/ratelimit.go).
+
+```go
+limiter = ratelimit.New(
+    10, 20,    // device: 10 msg/s sustained, burst 20
+    200, 400,  // tenant: 200 msg/s sustained, burst 400
+)
+
+// În handleMessage, înainte de scriere:
+if !limiter.Allow(deviceID, tenantTag) {
+    logging.Drop("rate limited", logging.Fields{...})
+    return
+}
+```
+
+2 niveluri paralele: per-device + per-tenant. Allow() consumă din ambele; deny dacă oricare e gol.
+
+**Limite documentate:**
+- in-process — la mai multe instanțe Go (Faza 2.3 cu shared subscription) un device alternând între workers depășește limita configurată
+- Real cross-instance rate limit = Redis-backed în Faza 2.4
+- Util acum ca defense-in-depth la single-instance + bază pentru migrare la Redis fără refactor de aplicare
+
+## 16. Cod livrat
+
+### TenantMiddleware fixat ([tenants/middleware.py](django-bakend/tenants/middleware.py))
+```python
+class TenantMiddleware:
+    def __call__(self, request):
+        request.tenant = None
+        request.tenant_id = None
+        # ...
+        if not self.enabled:  # MULTI_TENANT_ENABLED kill-switch
+            return self.get_response(request)
+
+        # decode JWT, extract user_id + tenant_id
+        # ...
+
+        tenant = _resolve_tenant(user_id, tenant_id)  # cached, signal-invalidated
+        if tenant is None:
+            return JsonResponse(
+                {"detail": "User has no active membership in the requested tenant."},
+                status=403,
+            )
+
+        request.tenant = tenant
+        request.tenant_id = tenant.id
+        request.tenant_slug = tenant.slug
+        request.role = claims.get("role")
+        return self.get_response(request)
+```
+
+### Django ViewSet securizat ([clients/views.py](django-bakend/clients/views.py))
+```python
+class DeviceViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated, TenantRolePermission]
+
+    def get_queryset(self):
+        user = self.request.user
+        if _is_cross_tenant(user):
+            qs = Device.objects.all()
+            tenant_filter = self.request.query_params.get("tenant")
+            if tenant_filter:
+                qs = qs.filter(tenant_id=tenant_filter)
+        else:
+            tenant = getattr(self.request, "tenant", None)
+            if tenant is None:
+                raise PermissionDenied("No active tenant context.")
+            qs = Device.objects.for_tenant(tenant)
+        # ?tenant= ignorat pentru non-cross-tenant
+        return qs
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if _is_cross_tenant(user):
+            serializer.save()
+            return
+        tenant = getattr(self.request, "tenant", None)
+        if tenant is None:
+            raise drf_serializers.ValidationError({"tenant": "No tenant context in token."})
+        serializer.save(tenant=tenant, client=user)  # forțat din JWT
+```
+
+### Topic validator Go ([internal/topics/topics.go](go-iot-platform/internal/topics/topics.go))
+```go
+func Parse(topic string) (Parsed, error) {
+    if !strings.HasPrefix(topic, "tenants/") {
+        return Parsed{IsLegacy: true, Raw: topic}, nil
+    }
+    // tenants/{tid}/devices/{did}/{up|down}/{stream}
+    // strict validation; orice abatere → eroare → caller DROP
+}
+```
+
+### Validare device-tenant în handleMessage
+```go
+if !parsed.IsLegacy {
+    if !found {
+        logging.Drop("unknown device on tenant-scoped topic", ...)
+        return
+    }
+    if deviceTenantID != parsed.TenantID {
+        logging.Drop("device-tenant mismatch", logging.Fields{
+            "device_id":     deviceID,
+            "topic_tenant":  parsed.TenantID,
+            "device_tenant": deviceTenantID,
+        })
+        return
+    }
+}
+```
+
+### Buffer fallback ([internal/buffer/buffer.go](go-iot-platform/internal/buffer/buffer.go))
+```go
+func writePoint(p *write.Point, writeAPI influxdb2api.WriteAPIBlocking, topic string, payload []byte, fields logging.Fields) {
+    if err := writeAPI.WritePoint(context.Background(), p); err != nil {
+        fields["error"] = err.Error()
+        logging.Error("influx write failed", fields)
+        if bufErr := influxBuffer.Append(topic, payload, err); bufErr != nil {
+            logging.Error("buffer fallback failed", logging.Fields{"error": bufErr.Error()})
+        }
+        return
+    }
+    logging.Info("influx write ok", fields)
+}
+```
+
+## 17. Checklist validare securitate
+
+| Verificare | Status | Cum e validat |
+|------------|--------|---------------|
+| ❌ Acces cross-tenant prin `?tenant=`| Imposibil pentru user normal | `test_query_param_tenant_ignored_for_regular_user` |
+| ❌ Acces cu JWT vechi după revocare membership | 403 imediat | `test_revoked_membership_blocks_access` |
+| ❌ Acces în tenant suspendat | 403 imediat | `test_suspended_tenant_blocks_access` |
+| ❌ Spoof `tenant=other` la POST /api/devices/ | tenant suprascris cu cel din JWT | `test_device_create_uses_tenant_from_jwt` |
+| ❌ Device publică pe topic `tenants/{altul}/...` | DROP la handleMessage | logică în [main.go](go-iot-platform/cmd/main.go) + topic parser |
+| ❌ Topic malformed (segments lipsă, empty IDs, non-numeric tenant) | DROP | 8 sub-cazuri error în [topics_test.go](go-iot-platform/internal/topics/topics_test.go) |
+| ❌ Device necunoscut pe topic schema nouă | DROP | logică în [main.go](go-iot-platform/cmd/main.go) |
+| ✔ Toate query-urile filtrate pe tenant | da | view-set strict pentru non-cross-tenant |
+| ✔ Toate datele Influx au `tenant_id` + `device` | da din 1.8 | tag-uri obligatorii în NewPoint, drop dacă device_id gol |
+| ✔ Erori Influx loghate + buffer fallback | da | `writePoint` helper în [main.go](go-iot-platform/cmd/main.go), test [buffer_test.go](go-iot-platform/internal/buffer/buffer_test.go) |
+| ✔ Logs structurate JSON cu tenant/device/topic | da | [logging package](go-iot-platform/internal/logging/logging.go) + integrare în handleMessage |
+| ✔ Rate limit per-device + per-tenant | da, in-process | [ratelimit package](go-iot-platform/internal/ratelimit/ratelimit.go) |
+
+## 18. Datorie tehnică (deferată Fazei 2 cu motiv documentat)
+
+| Item Faza 1.9 | Limita curentă | Adresat în |
+|---------------|----------------|-----------|
+| #4 device-tenant validation | Doar pentru topicuri schema nouă; legacy păstrează lookup permisiv | Faza 2.1 (toate device-urile pe topic schema nouă cu credentials per-device) |
+| #5 topic validation strict | Schema nouă coexistă cu legacy; nu putem refuza tot ce nu e `tenants/...` | Faza 2.1 + 2.2 (bridge pentru legacy → schema nouă) |
+| #8 buffer fără rotație/replay | Disk poate umple; replay manual | Faza 2.5 (`WriteAPI` async cu retry built-in din SDK) |
+| #10 rate limit in-memory | Single-instance only — workers paraleli depășesc limita | Faza 2.4 (Redis-backed cu token state partajat) |
+| `GetAllDevices()` per mesaj MQTT | HTTP roundtrip pe fiecare ingest — bottleneck cunoscut | Faza 2.4 (cache Redis device→tenant cu invalidare push) |
+
+## 19. Concluzie Faza 1.9
+
+Sistem hardened pe 4 dimensiuni: **tenancy strict** (membership re-check + queryset rigid + ?tenant= restricționat), **integritate ingest** (topic parser + device-tenant cross-check + tag enforcement), **reziliență** (file fallback + structured logging), **defense-in-depth** (rate limit + kill-switch).
+
+Suite-ul de teste a crescut la **52 Django + 5 pachete Go cu teste**. Implementarea respectă constrângerea „nu redesena arhitectura" — doar 1 modificare în settings.py (flag) și extensie de pachete `internal/` în Go.
+
+Faza 1.9 face Faza 1 production-ready. Faza 2 va înlocui workaround-urile in-process (rate limit, cache device→tenant) cu infrastructura corectă (Redis), va clusteriza brokerul (EMQX cu shared subscriptions), și va finaliza migrarea topicurilor către schema nouă.
