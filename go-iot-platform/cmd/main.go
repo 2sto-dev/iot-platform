@@ -24,6 +24,7 @@ import (
 
 	"go-iot-platform/internal/api"
 	"go-iot-platform/internal/buffer"
+	"go-iot-platform/internal/cache"
 	"go-iot-platform/internal/django"
 	"go-iot-platform/internal/influx"
 	"go-iot-platform/internal/logging"
@@ -35,11 +36,13 @@ var (
 	titleCaser = cases.Title(language.Und)
 
 	// Rate limit: 10 msg/s per device (burst 20), 200 msg/s per tenant (burst 400).
-	// Tunable din env în viitor; momentan hardcodat ca să rămână simplu.
 	limiter = ratelimit.New(10, 20, 200, 400)
 
-	// Fallback fișier când Influx pică. Path absolut → vezi setupBuffer().
+	// Fallback fișier când Influx pică.
 	influxBuffer *buffer.FileBuffer
+
+	// Cache device→tenant cu Redis ca primary store + fallback Django (Faza 2.4).
+	deviceCache *cache.Cache
 )
 
 func main() {
@@ -66,6 +69,39 @@ func main() {
 	} else {
 		influxBuffer = buf
 		defer influxBuffer.Close()
+	}
+
+	// Faza 2.4: Redis cache pentru lookup device→tenant (înlocuiește GetAllDevices() per-message).
+	if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
+		dbNum := 0
+		if v := os.Getenv("REDIS_DB"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				dbNum = n
+			}
+		}
+		c, err := cache.New(ctx, cache.Config{
+			Addr:     redisAddr,
+			Password: os.Getenv("REDIS_PASSWORD"),
+			DB:       dbNum,
+		})
+		if err != nil {
+			log.Printf("⚠️ Redis cache disabled (%v); fallback la Django per-message", err)
+		} else {
+			deviceCache = c
+			defer deviceCache.Close()
+			if err := deviceCache.Warm(ctx); err != nil {
+				log.Printf("⚠️ cache warm failed: %v", err)
+			} else {
+				log.Println("✅ Redis cache device→tenant warmed")
+			}
+			go func() {
+				for err := range deviceCache.SubscribeInvalidations(ctx) {
+					log.Printf("⚠️ cache invalidation error: %v", err)
+				}
+			}()
+		}
+	} else {
+		log.Println("⚠️ REDIS_ADDR not set; cache disabled, fallback la GetAllDevices() per-message")
 	}
 
 	go startMQTTSubscriber(ctx, writeAPI)
@@ -208,18 +244,28 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
 		return
 	}
 
-	devices, _ := django.GetAllDevices()
+	// Faza 2.4: lookup via Redis cache (cu fallback la Django dacă cache nu e configurat)
 	tenantTag := "unassigned"
 	var deviceTenantID int64
 	found := false
-	for _, d := range devices {
-		if d.Serial == deviceID {
+	if deviceCache != nil {
+		if tid, ok := deviceCache.GetDeviceTenant(context.Background(), deviceID); ok {
 			found = true
-			deviceTenantID = d.TenantID
-			if d.TenantID > 0 {
-				tenantTag = strconv.FormatInt(d.TenantID, 10)
+			deviceTenantID = tid
+			tenantTag = cache.ParseTenantTag(tid)
+		}
+	} else {
+		// Fallback path când Redis nu e disponibil — comportamentul pre-2.4 (slow dar funcțional).
+		devices, _ := django.GetAllDevices()
+		for _, d := range devices {
+			if d.Serial == deviceID {
+				found = true
+				deviceTenantID = d.TenantID
+				if d.TenantID > 0 {
+					tenantTag = strconv.FormatInt(d.TenantID, 10)
+				}
+				break
 			}
-			break
 		}
 	}
 

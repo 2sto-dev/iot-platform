@@ -113,3 +113,8 @@ SIMPLE_JWT = {
 # La False: middleware devine no-op și viewset-urile permit acces ne-tenant-scoped.
 # Util pentru rollback de urgență fără rollback de migrare DB.
 MULTI_TENANT_ENABLED = config("MULTI_TENANT_ENABLED", default=True, cast=bool)
+
+# Faza 2.4: Redis pentru cache device→tenant invalidation pub/sub.
+# Format URL: redis://[:password]@host:port/db (vezi clients/signals.py).
+# Opțional: dacă lipsește, signals devin no-op și Go-ul cade pe fallback Django per-message.
+REDIS_URL = config("REDIS_URL", default="")
