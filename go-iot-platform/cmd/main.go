@@ -60,9 +60,23 @@ func main() {
 		log.Fatalf("Eroare login Django: %v", err)
 	}
 
-	influxClient := influxdb2.NewClient(influx.URL, influx.Token)
+	// Faza 2.5: WriteAPI async cu batching în loc de WriteAPIBlocking.
+	// BatchSize=5000, FlushInterval=1s → debit 10x+ pe single instance.
+	// Erorile sunt consumate dintr-un canal dedicat și loghate + buffer fallback.
+	opts := influxdb2.DefaultOptions().
+		SetBatchSize(5000).
+		SetFlushInterval(1000) // ms
+	influxClient := influxdb2.NewClientWithOptions(influx.URL, influx.Token, opts)
 	defer influxClient.Close()
-	writeAPI := influxClient.WriteAPIBlocking(influx.Org, influx.Bucket)
+	writeAPI := influxClient.WriteAPI(influx.Org, influx.Bucket)
+	go func() {
+		for err := range writeAPI.Errors() {
+			logging.Error("influx async write error", logging.Fields{"error": err.Error()})
+			if influxBuffer != nil {
+				_ = influxBuffer.Append("(async batch)", []byte("(batch error)"), err)
+			}
+		}
+	}()
 
 	if buf, err := buffer.New("logs/influx_fallback.log"); err != nil {
 		log.Printf("⚠️ Buffer fallback unavailable: %v (Influx errors will only be logged)", err)
@@ -134,7 +148,7 @@ func main() {
 	}
 }
 
-func startMQTTSubscriber(ctx context.Context, writeAPI influxdb2api.WriteAPIBlocking) {
+func startMQTTSubscriber(ctx context.Context, writeAPI influxdb2api.WriteAPI) {
 	mqttBroker := os.Getenv("MQTT_BROKER")
 	mqttUsername := os.Getenv("MQTT_USER")
 	mqttPassword := os.Getenv("MQTT_PASS")
@@ -143,38 +157,42 @@ func startMQTTSubscriber(ctx context.Context, writeAPI influxdb2api.WriteAPIBloc
 		log.Fatal("⚠️ MQTT_BROKER nu este setat în .env")
 	}
 
-	devices, err := django.GetAllDevices()
-	if err != nil {
-		log.Fatalf("Eroare la preluarea device-urilor din Django: %v", err)
+	// Faza 2.3: shared subscription pe schema nouă tenant-aware. EMQX distribuie mesajele
+	// load-balanced între instanțele care se abonează cu același share name "ingest" → poți
+	// rula N instanțe Go fără duplicare.
+	//
+	// Topicuri legacy (vendor-shaped) sunt covered separat de bridge (Faza 2.2) sau, până
+	// atunci, de un fallback pe pattern-urile cunoscute. Wildcard "#" eliminat — era
+	// risc de a primi tot ce trece prin broker, inclusiv noise/control plane MQTT.
+	clientID := os.Getenv("MQTT_CLIENT_ID")
+	if clientID == "" {
+		clientID = fmt.Sprintf("go-ingest-%d", time.Now().UnixNano())
 	}
 
-	var mqttTopics []string
-	for _, d := range devices {
-		mqttTopics = append(mqttTopics, d.Topics...)
+	subscriptions := []string{
+		"$share/ingest/tenants/+/devices/+/up/#", // schema nouă (Faza 2.1)
+		// Legacy fallback patterns — eliminate când Faza 2.2 (bridge) e activ în prod.
+		"$share/ingest-legacy/shellies/+/#",
+		"$share/ingest-legacy/tele/+/#",
+		"$share/ingest-legacy/zigbee2mqtt/+",
 	}
 
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(mqttBroker)
 	opts.SetUsername(mqttUsername)
 	opts.SetPassword(mqttPassword)
+	opts.SetClientID(clientID)
+	opts.SetCleanSession(true)
 
 	opts.OnConnect = func(c mqtt.Client) {
-		for _, topic := range mqttTopics {
+		for _, topic := range subscriptions {
 			if token := c.Subscribe(topic, 0, func(client mqtt.Client, msg mqtt.Message) {
 				go handleMessage(msg, writeAPI)
 			}); token.Wait() && token.Error() != nil {
 				log.Printf("Eroare la abonare topic %s: %v\n", topic, token.Error())
 			} else {
-				log.Printf("Abonat la topic (din Django): %s\n", topic)
+				log.Printf("✅ Abonat la (shared): %s", topic)
 			}
-		}
-
-		if token := c.Subscribe("#", 0, func(client mqtt.Client, msg mqtt.Message) {
-			go handleMessage(msg, writeAPI)
-		}); token.Wait() && token.Error() != nil {
-			log.Printf("Eroare la abonare wildcard (#): %v\n", token.Error())
-		} else {
-			log.Println("Abonat la toate topicurile MQTT (#) pentru descoperire automată")
 		}
 	}
 
@@ -206,21 +224,14 @@ type SensorMessage struct {
 	ENERGY EnergyData `json:"ENERGY"`
 }
 
-// writePoint scrie un punct în Influx cu fallback la fișier dacă scrierea eșuează.
-// Loghează result-ul structurat (level=info la succes, level=error la eșec).
-func writePoint(p *write.Point, writeAPI influxdb2api.WriteAPIBlocking, topic string, payload []byte, fields logging.Fields) {
-	if err := writeAPI.WritePoint(context.Background(), p); err != nil {
-		fields["error"] = err.Error()
-		logging.Error("influx write failed", fields)
-		if bufErr := influxBuffer.Append(topic, payload, err); bufErr != nil {
-			logging.Error("buffer fallback failed", logging.Fields{"error": bufErr.Error()})
-		}
-		return
-	}
-	logging.Info("influx write ok", fields)
+// writePoint scrie un punct în Influx (fire-and-forget; erorile vin pe writeAPI.Errors()
+// channel consumat în main). Loghează enqueue-ul structurat.
+func writePoint(p *write.Point, writeAPI influxdb2api.WriteAPI, topic string, payload []byte, fields logging.Fields) {
+	writeAPI.WritePoint(p)
+	logging.Info("influx write enqueued", fields)
 }
 
-func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPIBlocking) {
+func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
 	topic := msg.Topic()
 	payload := msg.Payload()
 
