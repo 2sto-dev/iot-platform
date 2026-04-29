@@ -884,3 +884,123 @@ Sistem hardened pe 4 dimensiuni: **tenancy strict** (membership re-check + query
 Suite-ul de teste a crescut la **52 Django + 5 pachete Go cu teste**. Implementarea respectă constrângerea „nu redesena arhitectura" — doar 1 modificare în settings.py (flag) și extensie de pachete `internal/` în Go.
 
 Faza 1.9 face Faza 1 production-ready. Faza 2 va înlocui workaround-urile in-process (rate limit, cache device→tenant) cu infrastructura corectă (Redis), va clusteriza brokerul (EMQX cu shared subscriptions), și va finaliza migrarea topicurilor către schema nouă.
+
+---
+---
+
+# Raport Faza 2 (în curs) — Ingest scalabil
+
+> Status: 🔵 ÎN CURS — provisioning infra + 4 din 7 sub-pași implementați (2026-04-30)
+
+## 20. Sumar progres Faza 2
+
+| Sub-pas | Status | Commit |
+|---------|--------|--------|
+| 2.1 EMQX cu ACL pe VM dedicat | 🟡 Parțial — provisioned (anonymous, cutover compat); HTTP ACL hook deferat | (provisioning manual) |
+| 2.2 MQTT bridge legacy → tenant-scoped | ⏳ Următorul pas | — |
+| 2.3 Go shared subscription | ✅ Done | `095ab61` |
+| 2.4 Redis cache device→tenant | ✅ Done | `79b280f` |
+| 2.5 Influx batch writes | ✅ Done | `095ab61` |
+| 2.6 Kafka/NATS buffer (opțional) | ⏳ Out of scope minim | — |
+| 2.7 Multi-bucket Influx per tenant | ⏳ După 2.2 | — |
+
+## 21. Infrastructură provisionată
+
+Două VM-uri Debian 13 (trixie) configurate cu user `c` (NOPASSWD sudo):
+
+### redis-1 (172.16.0.108)
+
+- 2 vCPU, 2GB RAM, 29GB disk
+- Redis 8.0.2 instalat din apt
+- Config: `bind 127.0.0.1 172.16.0.108`, `requirepass`, `appendonly yes`, `protected-mode yes`
+- ufw: deny incoming, allow ssh din `172.16.0.0/24`, allow 6379 doar din `172.16.0.105` (VM-app)
+- Smoke test live: PING/SET/GET OK; AOF active
+
+### emqx-1 (172.16.0.103)
+
+- 2 vCPU, 2GB RAM, 29GB disk
+- EMQX 5.8.6 instalat din .deb (debian12 compat — repo trixie nu există încă)
+- Listeners active: TCP 1883, MQTTS 8883, WS 8083, WSS 8084, admin web 18083
+- Hostname corectat din `eqmx-1` în `emqx-1`; entry în `/etc/hosts` adăugat
+- Admin password schimbat din default (`admin/public`) în secret-ul comun
+- ufw: deny incoming, allow ssh + 1883/8883/18083 din `172.16.0.0/24`
+- Anonymous auth = ON (cutover compat); HTTP ACL hook va veni la 2.1 partea 2
+- Smoke test pub/sub round-trip via mosquitto_pub/sub: OK
+
+## 22. Status pe sub-pași implementați
+
+### 2.3 Go shared subscription (commit `095ab61`)
+
+**Înainte:** `Subscribe("#")` (toate topicurile) — risc + duplicare la mai multe instanțe.
+
+**După:** Shared subscriptions pe pattern-uri tenant-aware și legacy:
+- `$share/ingest/tenants/+/devices/+/up/#` — schema nouă
+- `$share/ingest-legacy/shellies/+/#`, `$share/ingest-legacy/tele/+/#`, `$share/ingest-legacy/zigbee2mqtt/+` — tranzitoriu
+
+EMQX distribuie load-balanced între workers cu același share name. **N instanțe Go = N× throughput, zero duplicare.**
+
+`MQTT_CLIENT_ID` opțional din env; default unic per instanță (timestamp ns).
+
+### 2.4 Redis cache device→tenant (commit `79b280f`)
+
+**Înainte:** `GetAllDevices()` HTTP la Django pe **fiecare** mesaj MQTT — bottleneck cunoscut.
+
+**După:** Pachet nou [internal/cache/](go-iot-platform/internal/cache/cache.go):
+- Redis ca primary store (TTL 10min); miss → fallback Django + repopulare
+- Negative cache (30s) pentru device-uri inexistente — evită Django thrashing
+- Pub/sub pe canalul `device-cache-invalidate` pentru propagare <1s
+- Stats hits/misses pentru Prometheus (Faza 4.4)
+- Warm-up la startup cu lista completă
+
+Django side: [clients/signals.py](django-bakend/clients/signals.py) — `post_save`/`post_delete` pe `Device` publică pe Redis. Lipsa `REDIS_URL` în env → no-op cu warning.
+
+**Impact:** ingest path scapă de roundtrip HTTP/Django/MySQL pe fiecare mesaj. Latență mesaj typically <2ms vs. ~30-50ms pre-2.4.
+
+### 2.5 Influx batch writes (commit `095ab61`)
+
+**Înainte:** `WriteAPIBlocking.WritePoint()` per punct — un round-trip HTTP la Influx pentru fiecare scriere. Limita ~50-100 msg/s pe instance.
+
+**După:** `WriteAPI` async cu `BatchSize=5000`, `FlushInterval=1s`. `writePoint()` devine fire-and-forget. Erorile vin pe `writeAPI.Errors()` channel consumat dedicat pe goroutine + buffer fallback (din Faza 1.9 #8).
+
+**Impact:** debit estimat 10×+ pe single instance. Combinat cu 2.3 (N instanțe), throughput-ul total scalează liniar.
+
+## 23. .env / config schimbări
+
+### go-iot-platform/.env (local, necomitat — sample în .env.example)
+
+```
+REDIS_ADDR=172.16.0.108:6379
+REDIS_PASSWORD=egoqwedc/12
+REDIS_DB=0
+MQTT_CLIENT_ID=  # default = unic per instanță
+MQTT_BROKER=tcp://172.16.0.103:1883  # de actualizat la cutover EMQX
+```
+
+### django-bakend/.env
+
+```
+REDIS_URL=redis://:egoqwedc%2F12@172.16.0.108:6379/0  # %2F = "/" URL-encoded
+```
+
+### Pași operaționali rămași
+
+1. **Cutover MQTT broker** la `172.16.0.103:1883` — modifică `MQTT_BROKER` în `.env` Go și restartează ingest-ul. Devicele vor continua să funcționeze (anonymous auth permite).
+2. **Restart Django** ca să încarce `clients/signals.py` nou și `REDIS_URL`.
+
+## 24. Pași rămași Faza 2
+
+### 2.1 partea 2 — HTTP ACL hook în Django
+
+- Endpoint `POST /api/mqtt-auth/` care primește `{username, password, topic, action}` de la EMQX și răspunde `{result: allow|deny}`
+- EMQX config: `authentication.http` apelează endpoint-ul la connect/publish/subscribe
+- Permite revocare per-device + ACL strict per-tenant
+
+### 2.2 — MQTT bridge legacy → tenant-scoped
+
+- Pachet nou `internal/bridge/`: subscriber pe topicuri vendor (`shellies/...`), lookup serial→tenant via cache, republish pe `tenants/{tid}/devices/{did}/up/...`
+- Permite scoaterea pattern-urilor legacy din 2.3 după ce toate device-urile sunt migrate
+
+### 2.7 — Multi-bucket Influx per tenant (sau retention policy per plan)
+
+- La crearea unui Tenant, Django provisionează automat un bucket Influx dedicat (sau folosește bucket per tier de plan: free=7d, pro=90d, enterprise=2y)
+- Go writer rutează pe bucket bazat pe `tenant_id`

@@ -9,7 +9,7 @@ Platformă IoT multi-tenant: Django (control plane), Go (data plane / MQTT inges
 | **Faza 0** — Stabilizare și fundație | ✅ Completă | [raport.md §1–6](raport.md) |
 | **Faza 1** — Refactor multi-tenant | ✅ Completă, deployed | [raport.md §7–13](raport.md) |
 | **Faza 1.9** — Hardening punctual | ✅ Completă | [raport.md §14–19](raport.md) |
-| **Faza 2** — Ingest scalabil (EMQX cluster, Redis, batch writes) | ⏳ Următoarea | [plan.md §Faza 2](plan.md) |
+| **Faza 2** — Ingest scalabil (EMQX cluster, Redis, batch writes) | 🔵 În curs (4/7 sub-pași: 2.3, 2.4, 2.5 done; infra provisionată) | [raport.md §20–24](raport.md) |
 | **Faza 3** — Control plane device (provisioning, downlink, OTA) | ⏳ | [plan.md §Faza 3](plan.md) |
 | **Faza 4** — Funcționalități platformă (rules, billing, audit) | ⏳ | [plan.md §Faza 4](plan.md) |
 
