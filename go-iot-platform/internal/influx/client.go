@@ -3,7 +3,9 @@ package influx
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
+	"strings"
 
 	"go-iot-platform/internal/config"
 
@@ -20,6 +22,28 @@ var (
 const DefaultRange = "-5m"
 
 var rangeRe = regexp.MustCompile(`^-?\d+[smhd]$`)
+
+// getQueryBuckets returns the list of Influx buckets to query for reads.
+// Faza 2.7: writes may be routed to per-plan buckets; for reads we query across
+// all configured buckets (default + per-plan) and take the latest point.
+func getQueryBuckets() []string {
+	bset := map[string]struct{}{}
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			bset[s] = struct{}{}
+		}
+	}
+	add(Bucket)
+	add(os.Getenv("INFLUX_BUCKET_FREE"))
+	add(os.Getenv("INFLUX_BUCKET_PRO"))
+	add(os.Getenv("INFLUX_BUCKET_ENTERPRISE"))
+	out := make([]string, 0, len(bset))
+	for b := range bset {
+		out = append(out, b)
+	}
+	return out
+}
 
 func GetFieldForDevice(device, field, rangeStr string, tenantID int64) (float64, error) {
 	if rangeStr == "" {
@@ -40,12 +64,26 @@ func GetFieldForDevice(device, field, rangeStr string, tenantID int64) (float64,
 		tenantFilter = fmt.Sprintf(` and (r.tenant_id == "%d" or not exists r.tenant_id)`, tenantID)
 	}
 
-	flux := fmt.Sprintf(`
+	buckets := getQueryBuckets()
+	var flux string
+	if len(buckets) == 1 {
+		flux = fmt.Sprintf(`
         from(bucket: "%s")
         |> range(start: %s)
         |> filter(fn: (r) => r._measurement == "devices" and r.device == "%s" and r._field == "%s"%s)
         |> last()
-    `, Bucket, rangeStr, device, field, tenantFilter)
+    `, buckets[0], rangeStr, device, field, tenantFilter)
+	} else {
+		tables := make([]string, 0, len(buckets))
+		for _, b := range buckets {
+			tables = append(tables, fmt.Sprintf(`from(bucket: "%s") |> range(start: %s)`, b, rangeStr))
+		}
+		flux = fmt.Sprintf(`
+        union(tables: [%s])
+        |> filter(fn: (r) => r._measurement == "devices" and r.device == "%s" and r._field == "%s"%s)
+        |> last()
+    `, strings.Join(tables, ", "), device, field, tenantFilter)
+	}
 
 	result, err := q.Query(context.Background(), flux)
 	if err != nil {

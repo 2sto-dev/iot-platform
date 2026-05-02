@@ -1004,3 +1004,108 @@ REDIS_URL=redis://:egoqwedc%2F12@172.16.0.108:6379/0  # %2F = "/" URL-encoded
 
 - La crearea unui Tenant, Django provisionează automat un bucket Influx dedicat (sau folosește bucket per tier de plan: free=7d, pro=90d, enterprise=2y)
 - Go writer rutează pe bucket bazat pe `tenant_id`
+
+---
+
+# Raport Faza 2 — Ingest scalabil (final)
+
+> Data raport: 2026-05-02  
+> Referință plan: [plan.md](plan.md)
+
+## 25. Sumar executiv Faza 2
+
+Status Faza 2: ✅ COMPLETĂ (fără configurare Redis/EMQX) — livrate: 2.3 (suport în cod), 2.5 (activ), 2.7 (suport în cod; necesită buckets Influx), 2.2 (cod disponibil, neactivat). 2.1 și 2.4 sunt pregătite în cod dar neconfigurate infrastructural; 2.6 opțional, nelivrat.
+
+- Endpoint Django ACL (EMQX HTTP ACL) — livrat ca API; EMQX nu este configurat în Faza 2 (nu se aplică enforcement la nivel de broker)
+- MQTT bridge pentru device-uri legacy — cod disponibil și testat local; neactiv până la cutover-ul pe broker (va republish-a pe schema tenants/{tid}/devices/{did}/up/...)
+- Ingest Go:
+  - Shared subscriptions (suport în cod pentru schema nouă); folosirea efectivă depinde de broker (ex. EMQX); dezactivare abonări legacy când bridge-ul e activ
+  - Cache device→tenant (Redis) — pregătit în cod; în Faza 2 nu se configurează Redis → fallback Django (REDIS_ADDR neconfigurat)
+  - Influx async batching (5k batch/1s) + fallback fișier
+  - Rutare per bucket Influx în funcție de planul tenantului (free/pro/enterprise)
+
+Test local de performanță (single instance): îmbunătățiri semnificative datorită Influx batch writes; validarea multi-instanță și load balancing depind de configurația brokerului (neefectuată în Faza 2).
+
+Notă: activarea infrastructurii EMQX/Redis nu se face în Faza 2; este planificată ca pași OPS 2.1R și 2.4R (vezi plan.md).
+
+## 26. Implementare detaliată
+
+### 26.1 EMQX HTTP ACL hook — ⚠️ pregătit (EMQX neconfigurat în Faza 2)
+- Endpoint nou: `POST /api/mqtt-acl/` (Django)
+- Reguli:
+  - `tenants/{tid}/devices/{did}/up/#`: allow doar dacă `Device(serial=did, tenant_id=tid)` și `(username == mqtt-bridge || clientid == did)`
+  - Legacy topics: `shellies/`, `tele/`, `zigbee2mqtt/` → allow (tranziție)
+  - Subscribe: allow doar pe `.../up/#` (fără downlink în Faza 2)
+- Notă: EMQX NU este configurat în Faza 2. Configurația de mai sus va fi aplicată într-o fază ulterioară.
+
+### 26.2 MQTT bridge legacy — ✅
+- `cmd/mqtt-bridge`: subscribe pe vendor topics, translate → publish pe schema nouă
+- Ingest: `ENABLE_LEGACY_SUBS=false` → doar schema nouă
+
+### 26.3 Shared subscription ingest — ✅ (suport în cod)
+- `$share/ingest/tenants/+/devices/+/up/#` — load balancing disponibil dacă brokerul suportă shared subscriptions (ex. EMQX). În Faza 2 nu se configurează brokerul; ingest funcționează și fără shared subs.
+
+### 26.4 Cache device→tenant (Redis) — ⚠️ pregătit în cod, neconfigurat în Faza 2
+- Implementare completă (TTL 10m, negative cache, invalidări pub/sub) — dar REDIS_ADDR rămâne neconfigurat în Faza 2 → fallback Django activ.
+
+### 26.5 Influx batch writes — ✅
+- `WriteAPI` async (BatchSize=5000, FlushInterval=1s), erori consumate + fallback file log
+
+### 26.6 Multi-bucket Influx per plan — ✅
+- Buckets: `iot_free` (7d), `iot_pro` (90d), `iot_enterprise` (730d)
+- Go: rutare pe bucket conform plan ↑ (caching plan 10m)
+- Django: `GET /api/tenants/{id}/plan/` — returnează `{"plan": "..."}`
+
+## 27. Verificări
+
+- ACL (validat prin teste Django ale endpoint-ului; fără configurare la nivel de broker în Faza 2):
+  - ✅ allow: `tenants/1/devices/ABC/up/telemetry` cu `clientid=ABC` (unit test)
+  - ✅ allow: `tenants/1/devices/ABC/up/telemetry` cu `username=mqtt-bridge` (unit test)
+  - ✅ deny: `tenants/2/devices/ABC/up/telemetry` (unit test)
+  - ✅ allow: `shellies/ABC/emeter/0/power` (unit test)
+- Influx:
+  - ✅ `tenant_id` tag prezent pe toate punctele
+  - ✅ bucket corect (free/pro/enterprise) conform planului tenantului
+
+## 28. Observații și riscuri
+
+- Fără credențiale per-device (Faza 3.1), publish-ul bazat pe `clientid==serial` e spoofable. ACL-ul limitează totuși traversarea între tenanți.
+- Rate limiting cross-instance (Redis-backed) rămâne pentru o fază ulterioară; momentan e in-process (defense-in-depth).
+
+## 29. Pași următori (Faza 3 — în curs)
+
+- 3.1 Provisioning service: cod livrat (model DeviceCredential, /api/devices/{id}/credentials/rotate/, /api/mqtt-auth/). Integrarea EMQX authentication.http se face în OPS (după 2.1R).
+
+- 3.1 Credențiale per-device + EMQX authentication HTTP
+- 3.3 Downlink command path
+- 3.4 Device shadow
+
+## 30. Rezultatele testelor — Faza 2
+
+| Suite | Rezultat | Durată | Comandă |
+|-------|----------|--------|---------|
+| Django (pytest) | 59/59 passed | 177.08 s | `cd django-bakend && pytest -q` |
+| Go (`go test ./...`) | PASS (8 pachete ok, 0 fail) | ~2–3 s | `cd go-iot-platform && go test ./...` |
+
+- Detaliu Django (noi în Faza 2): tenants/tests/test_mqtt_acl.py — 5 teste PASSED; provisioning/tests/test_provisioning.py — 2 teste PASSED (rotate credential, mqtt auth allow/deny)
+  - test_allow_legacy_shellies
+  - test_allow_tenant_scoped_up_with_clientid_match
+  - test_allow_tenant_scoped_up_with_bridge_user
+  - test_deny_cross_tenant
+  - test_subscribe_only_up
+
+- Restul testelor Django (52) rămân verzi (vezi §9.1 din Faza 1.9 pentru listă și acoperire).
+
+- Detaliu Go: pachete testate (toate ok)
+  - internal/api — PASS
+  - internal/influx — PASS
+  - internal/topics — PASS
+  - internal/bridge — PASS
+  - internal/buffer — PASS
+  - internal/cache — PASS
+  - internal/logging — PASS
+  - internal/ratelimit — PASS
+
+Observații:
+- Comenzile au rulat local în mediul dev; recomandare: adăugarea/actualizarea job-ului CI pentru a include noile teste Django și a raporta numărul (57) în Actions la fiecare push.
+

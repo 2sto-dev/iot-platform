@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -43,6 +44,17 @@ var (
 
 	// Cache device→tenant cu Redis ca primary store + fallback Django (Faza 2.4).
 	deviceCache *cache.Cache
+
+	// Client Influx global + writeAPI-uri per bucket (pentru 2.7)
+	influxClient influxdb2.Client
+	writeAPIs    sync.Map // map[bucket]influxdb2api.WriteAPI
+
+	// Cache in-process pentru planul tenantului (TTL 10min)
+	planCache = map[int64]struct {
+		plan  string
+		until time.Time
+	}{}
+	planCacheMutex sync.Mutex
 )
 
 func main() {
@@ -66,12 +78,12 @@ func main() {
 	opts := influxdb2.DefaultOptions().
 		SetBatchSize(5000).
 		SetFlushInterval(1000) // ms
-	influxClient := influxdb2.NewClientWithOptions(influx.URL, influx.Token, opts)
+	influxClient = influxdb2.NewClientWithOptions(influx.URL, influx.Token, opts)
 	defer influxClient.Close()
 	writeAPI := influxClient.WriteAPI(influx.Org, influx.Bucket)
 	go func() {
 		for err := range writeAPI.Errors() {
-			logging.Error("influx async write error", logging.Fields{"error": err.Error()})
+			logging.Error("influx async write error", logging.Fields{"bucket": influx.Bucket, "error": err.Error()})
 			if influxBuffer != nil {
 				_ = influxBuffer.Append("(async batch)", []byte("(batch error)"), err)
 			}
@@ -171,10 +183,14 @@ func startMQTTSubscriber(ctx context.Context, writeAPI influxdb2api.WriteAPI) {
 
 	subscriptions := []string{
 		"$share/ingest/tenants/+/devices/+/up/#", // schema nouă (Faza 2.1)
-		// Legacy fallback patterns — eliminate când Faza 2.2 (bridge) e activ în prod.
-		"$share/ingest-legacy/shellies/+/#",
-		"$share/ingest-legacy/tele/+/#",
-		"$share/ingest-legacy/zigbee2mqtt/+",
+	}
+	// Legacy fallback patterns — eliminate când Faza 2.2 (bridge) e activ în prod.
+	if os.Getenv("ENABLE_LEGACY_SUBS") != "false" {
+		subscriptions = append(subscriptions,
+			"$share/ingest-legacy/shellies/+/#",
+			"$share/ingest-legacy/tele/+/#",
+			"$share/ingest-legacy/zigbee2mqtt/+",
+		)
 	}
 
 	opts := mqtt.NewClientOptions()
@@ -229,6 +245,58 @@ type SensorMessage struct {
 func writePoint(p *write.Point, writeAPI influxdb2api.WriteAPI, topic string, payload []byte, fields logging.Fields) {
 	writeAPI.WritePoint(p)
 	logging.Info("influx write enqueued", fields)
+}
+
+// getWriteAPIForBucket returnează un WriteAPI async per bucket (singleton per bucket)
+func getWriteAPIForBucket(bucket string) influxdb2api.WriteAPI {
+	if v, ok := writeAPIs.Load(bucket); ok {
+		return v.(influxdb2api.WriteAPI)
+	}
+	api := influxClient.WriteAPI(influx.Org, bucket)
+	writeAPIs.Store(bucket, api)
+	go func() {
+		for err := range api.Errors() {
+			logging.Error("influx async write error", logging.Fields{"bucket": bucket, "error": err.Error()})
+			if influxBuffer != nil {
+				_ = influxBuffer.Append("(async batch)", []byte("(batch error)"), err)
+			}
+		}
+	}()
+	return api
+}
+
+// bucketForTenantPlan alege bucket-ul în funcție de planul tenantului, cu cache 10min
+func bucketForTenantPlan(tid int64) string {
+	plan := "free"
+	now := time.Now()
+	planCacheMutex.Lock()
+	if e, ok := planCache[tid]; ok && now.Before(e.until) {
+		plan = e.plan
+	} else {
+		if p, err := django.GetTenantPlan(tid); err == nil && p != "" {
+			plan = p
+			planCache[tid] = struct {
+				plan  string
+				until time.Time
+			}{plan: p, until: now.Add(10 * time.Minute)}
+		}
+	}
+	planCacheMutex.Unlock()
+
+	switch strings.ToLower(plan) {
+	case "pro":
+		if b := os.Getenv("INFLUX_BUCKET_PRO"); b != "" {
+			return b
+		}
+	case "enterprise":
+		if b := os.Getenv("INFLUX_BUCKET_ENTERPRISE"); b != "" {
+			return b
+		}
+	}
+	if b := os.Getenv("INFLUX_BUCKET_FREE"); b != "" {
+		return b
+	}
+	return influx.Bucket
 }
 
 func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
@@ -313,6 +381,14 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
 		})
 	}
 
+	// 2.7: determină bucket-ul pe baza planului tenantului (dacă e cunoscut)
+	bucket := influx.Bucket
+	if deviceTenantID > 0 {
+		bucket = bucketForTenantPlan(deviceTenantID)
+	}
+	// Folosește writeAPI per bucket
+	writeAPI = getWriteAPIForBucket(bucket)
+
 	// Scriere în Influx (cu loguri pe fiecare caz)
 	if strings.Contains(topic, "/emeter/0/") {
 		valStr := string(payload)
@@ -328,7 +404,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
 			map[string]interface{}{titleCaser.String(field): value},
 			time.Now())
 		writePoint(p, writeAPI, topic, payload, logging.Fields{
-			"source": "shelly", "field": field, "value": value, "device_id": deviceID, "tenant_id": tenantTag,
+			"source": "shelly", "field": field, "value": value, "device_id": deviceID, "tenant_id": tenantTag, "bucket": bucket,
 		})
 
 	} else if strings.Contains(topic, "/relay/0") {
@@ -342,7 +418,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
 			map[string]interface{}{"state": state},
 			time.Now())
 		writePoint(p, writeAPI, topic, payload, logging.Fields{
-			"source": "shelly", "type": "relay", "state": state, "device_id": deviceID, "tenant_id": tenantTag,
+			"source": "shelly", "type": "relay", "state": state, "device_id": deviceID, "tenant_id": tenantTag, "bucket": bucket,
 		})
 
 	} else if strings.HasSuffix(topic, "/STATE") {
@@ -356,7 +432,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
 			map[string]interface{}{"POWER": state.POWER, "RSSI": state.RSSI},
 			time.Now())
 		writePoint(p, writeAPI, topic, payload, logging.Fields{
-			"source": "nousat", "type": "state", "device_id": deviceID, "tenant_id": tenantTag,
+			"source": "nousat", "type": "state", "device_id": deviceID, "tenant_id": tenantTag, "bucket": bucket,
 		})
 
 	} else if strings.HasSuffix(topic, "/SENSOR") {
@@ -379,7 +455,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
 			},
 			t)
 		writePoint(p, writeAPI, topic, payload, logging.Fields{
-			"source": "nousat", "type": "energy", "device_id": deviceID, "tenant_id": tenantTag,
+			"source": "nousat", "type": "energy", "device_id": deviceID, "tenant_id": tenantTag, "bucket": bucket,
 		})
 
 	} else if strings.HasPrefix(topic, "zigbee2mqtt/") {
@@ -393,7 +469,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
 			data,
 			time.Now())
 		writePoint(p, writeAPI, topic, payload, logging.Fields{
-			"source": "zigbee2mqtt", "type": "sensor", "device_id": deviceID, "tenant_id": tenantTag,
+			"source": "zigbee2mqtt", "type": "sensor", "device_id": deviceID, "tenant_id": tenantTag, "bucket": bucket,
 		})
 
 	} else {
@@ -404,7 +480,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
 				data,
 				time.Now())
 			writePoint(p, writeAPI, topic, payload, logging.Fields{
-				"source": "generic", "type": "auto_detected", "device_id": deviceID, "tenant_id": tenantTag,
+				"source": "generic", "type": "auto_detected", "device_id": deviceID, "tenant_id": tenantTag, "bucket": bucket,
 			})
 		} else {
 			valStr := string(payload)
@@ -419,7 +495,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
 				map[string]interface{}{"value": val},
 				time.Now())
 			writePoint(p, writeAPI, topic, payload, logging.Fields{
-				"source": "generic", "type": "auto_detected_simple", "device_id": deviceID, "tenant_id": tenantTag,
+				"source": "generic", "type": "auto_detected_simple", "device_id": deviceID, "tenant_id": tenantTag, "bucket": bucket,
 			})
 		}
 	}

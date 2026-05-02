@@ -23,6 +23,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "clients",
     "tenants",
+    "provisioning",
 ]
 
 MIDDLEWARE = [

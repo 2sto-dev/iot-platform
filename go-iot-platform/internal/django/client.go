@@ -215,3 +215,43 @@ func RegisterDevice(dev RegisterDeviceRequest) error {
 	}
 	return nil
 }
+
+// 📋 Planul tenantului (free/pro/enterprise) — folosit pentru rutarea pe bucket Influx
+type TenantPlanResponse struct {
+	Plan string `json:"plan"`
+}
+
+func GetTenantPlan(tenantID int64) (string, error) {
+	client := &http.Client{Timeout: 3 * time.Second}
+	url := fmt.Sprintf("%s/tenants/%d/plan/", baseURL, tenantID)
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		if err := Refresh(); err != nil {
+			return "", err
+		}
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		resp, err = client.Do(req)
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+	}
+
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("tenant plan failed (%d): %s", resp.StatusCode, string(data))
+	}
+	var tp TenantPlanResponse
+	if err := json.Unmarshal(data, &tp); err != nil {
+		return "", err
+	}
+	return tp.Plan, nil
+}

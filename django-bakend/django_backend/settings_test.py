@@ -1,4 +1,5 @@
 """Test settings — overrides DB to in-memory SQLite so tests don't need MySQL."""
+
 import os
 
 os.environ.setdefault("DJANGO_SECRET_KEY", "testing-only-not-for-prod")

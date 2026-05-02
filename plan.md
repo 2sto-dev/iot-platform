@@ -152,6 +152,8 @@ Scop: introducerea conceptului de **Tenant** la toate nivelele (DB, JWT, API, lo
 
 Precondiție absolută: **Faza 1 încheiată.** Fără tenant_id în pipeline, scaling-ul reproduce defecte la scară mai mare.
 
+Notă operațională: configurarea infrastructurii (EMQX/Redis) NU se face în această fază de cod; se execută separat, în ferestre planificate, în pașii OPS 2.1R (EMQX-1) și 2.4R (redis-1).
+
 ### 2.1 EMQX clusterizabil cu ACL pe VM dedicat
 - **Depinde de:** 1.6 (consumer pattern), 1.8 (tenant tagging)
 - **Fișiere:** config EMQX (`/etc/emqx/emqx.conf` pe VM-mqtt), schemă topic-uri.
@@ -161,6 +163,21 @@ Precondiție absolută: **Faza 1 încheiată.** Fără tenant_id în pipeline, s
   - **HTTP ACL hook** către Django (`/api/mqtt-auth/`): la connect/publish/subscribe, EMQX întreabă Django dacă credențialele și topicul sunt valide pentru device. Permite revocation instant și ACL per-tenant.
   - (Opțional acum, obligatoriu pentru 3.1) listener TLS pe `:8883` cu certificat de la Let's Encrypt sau CA internă.
 - **Done when:** un device cu credențiale tenant A nu poate publica pe topic tenant B (refuzat de EMQX la publish).
+
+#### 2.1R — EMQX-1 configurare remote (OPS cutover)
+- Depinde de: 2.1 (endpoint ACL disponibil în Django), acces rețea către emqx-1
+- Țintă: emqx-1 (ex. 172.16.0.103)
+- Acțiuni:
+  - Backup config: `sudo cp /etc/emqx/emqx.conf /etc/emqx/emqx.conf.bak.$(date +%s)`
+  - Activează authorization HTTP către Django `/api/mqtt-acl/` (pipelining on, timeout 2s), setează `no_match=deny`
+  - Lasă `anonymous.auth = on` în Faza 2 (enforcement la nivel de topic prin ACL HTTP)
+  - Reload EMQX: `sudo emqx restart` (sau via dashboard)
+  - Smoke test: publish/subscribe local; POST către `/api/mqtt-acl/` (curl) pentru allow/deny
+- Done when:
+  - `sudo emqx ctl status` → running
+  - Publish pe topic corect → allow; cross-tenant → deny (verificat via curl către Django ACL)
+  - Listeners deschise: 1883, 8883 (opțional), 18083
+- Script util: `scripts/verify_emqx.sh` (local pe VM)
 
 ### 2.2 MQTT bridge pentru device-uri legacy (Shelly/NousAT/Zigbee2MQTT)
 - **Depinde de:** 2.1
@@ -186,6 +203,20 @@ Precondiție absolută: **Faza 1 încheiată.** Fără tenant_id în pipeline, s
   - Go citește din cache; miss → fallback HTTP la Django + populare cache.
 - **Done when:** schimbare tenant pe un device se propagă la Go în <1s; rata de hit cache > 99%.
 
+#### 2.4R — redis-1 configurare remote (OPS cutover)
+- Depinde de: 2.4 (cod pregătit în Go/Django), acces rețea către redis-1
+- Țintă: redis-1 (ex. 172.16.0.108)
+- Acțiuni:
+  - Asigură securizare de bază în `redis.conf`: `bind 127.0.0.1 172.16.0.108`, `requirepass <parola>`, `appendonly yes`, `protected-mode yes`
+  - UFW: permite 6379 doar din VM-app (ex. 172.16.0.105)
+  - Restart serviciu: `sudo systemctl restart redis-server`
+  - Smoke test: `redis-cli -a <parola> PING`, `SET/GET health:check`
+- Done when:
+  - `redis-cli -a <parola> PING` → PONG (local și din VM-app)
+  - `INFO persistence` arată `aof_enabled:1`
+  - 6379 nu e expus public (UFW restricționat)
+- Script util: `scripts/verify_redis.sh` (rulează cu `REDIS_PASSWORD` setat)
+
 ### 2.5 Influx batch writes
 - **Depinde de:** 2.3
 - **Fișiere:** [go-iot-platform/cmd/main.go:48,57](go-iot-platform/cmd/main.go#L48)
@@ -206,6 +237,19 @@ Precondiție absolută: **Faza 1 încheiată.** Fără tenant_id în pipeline, s
   - Writer-ul rutează pe bucket bazat pe `tenant_id`.
   - Retention diferit pe tier: free=7d, paid=90d, enterprise=2y.
 - **Done when:** Două tenant-uri cu plan diferit au retention diferit verificabil.
+
+### Definition of Done — Faza 2
+- Cod (livrabile în repo):
+  - 2.3 Shared subscriptions suportate în Go (fără Subscribe("#"))
+  - 2.5 Influx batch writes (WriteAPI async, batch 5k/1s, handler erori)
+  - 2.7 Rutare pe bucket Influx per plan (endpoints Django pentru plan, caching plan în Go)
+  - 2.2 Bridge legacy → tenant-scoped (cod disponibil, neactiv până la cutover)
+  - 2.1 Endpoint Django pentru ACL HTTP (EMQX) — implementat; integrare broker deferată la OPS 2.1R
+  - 2.4 Cache Redis device→tenant — implementat în cod + Django signals; activare infrastructurală deferată la OPS 2.4R
+- OPS (executate în ferestre planificate, în afara fazei de cod):
+  - 2.1R EMQX-1: activare Authorization HTTP (ACL) → allow/deny pe topicuri tenant-aware
+  - 2.4R redis-1: configurare securizată și expunere restrictivă pentru cache + pub/sub invalidări
+- Non-obligatoriu: 2.6 buffer Kafka/NATS (doar dacă devine necesar capacitiv)
 
 ---
 
