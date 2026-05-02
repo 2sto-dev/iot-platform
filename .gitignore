@@ -31,3 +31,22 @@ Thumbs.db
 **/logs/**
 go-iot-platform/bin/**
 go-iot-platform/bin/logs/**
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+logs/
+go-iot-platform/logs/
+go-iot-platform/bin/logs/
+kong/*.log
+
+# Go
+bin/
+*.exe
+*.out
+
+# Env
+.env
