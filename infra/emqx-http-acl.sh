@@ -1,29 +1,56 @@
 #!/usr/bin/env bash
-# Faza 2.1 — Activare HTTP Auth + ACL hook în EMQX 5.x
-# Rulează pe emqx-1 (172.16.0.103) ca user cu sudo (c@emqx-1)
+# Faza 2.1 — Re-scrie /etc/emqx/emqx.conf cu HTTP Auth + ACL hook.
+# Utilizat pentru reinstalare / reconfigurare EMQX pe emqx-1 (172.16.0.103).
 #
-# Usage:
-#   HOOK_SECRET=<secret> DJANGO_URL=http://172.16.0.105:8000 bash emqx-http-acl.sh
+# Precondiție: EMQX 5.8.6 instalat via dpkg (infra/emqx-install.sh).
 #
-# Dacă HOOK_SECRET e gol, verificarea secretului e dezactivată (nu recomandat în prod).
-# Dacă DJANGO_URL e gol, folosește default-ul de mai jos.
+# Usage (de pe mașina locală cu acces SSH la emqx-1):
+#   HOOK_SECRET=<valoare din django-bakend/.env MQTT_HOOK_SECRET> \
+#   DJANGO_URL=http://172.16.0.105:8000 \
+#   SSH_KEY=~/.ssh/id_ed25519_new \
+#   bash infra/emqx-http-acl.sh
+#
+# Sau direct pe emqx-1:
+#   HOOK_SECRET=... DJANGO_URL=... bash emqx-http-acl.sh
 
 set -euo pipefail
 
 DJANGO_URL="${DJANGO_URL:-http://172.16.0.105:8000}"
-HOOK_SECRET="${HOOK_SECRET:-}"
-CONF_DIR="/etc/emqx"
-CONF_FILE="$CONF_DIR/emqx.conf"
-OVERRIDE="$CONF_DIR/emqx-acl-override.conf"
+HOOK_SECRET="${HOOK_SECRET:?HOOK_SECRET must be set (see django-bakend/.env MQTT_HOOK_SECRET)}"
+SSH_KEY="${SSH_KEY:-~/.ssh/id_ed25519_new}"
+EMQX_HOST="c@172.16.0.103"
 
-echo "=== Faza 2.1: EMQX HTTP Auth/ACL ==="
-echo "  Django URL : $DJANGO_URL"
-echo "  Hook Secret: ${HOOK_SECRET:+(set)}"
+echo "=== EMQX HTTP Auth/ACL config ==="
+echo "  Django URL  : $DJANGO_URL"
+echo "  EMQX host   : $EMQX_HOST"
 echo ""
 
-# Creează fișierul de override (EMQX 5.x merges conf files la pornire)
-sudo tee "$OVERRIDE" > /dev/null <<CONF
-## HTTP Authenticator — verifică device-ul la CONNECT
+ssh -i "$SSH_KEY" "$EMQX_HOST" "sudo tee /etc/emqx/emqx.conf > /dev/null" << CONF
+## /etc/emqx/emqx.conf — generat de infra/emqx-http-acl.sh
+## Config precedence: etc/base.hocon < cluster.hocon < emqx.conf < env vars
+
+node {
+  name = "emqx@127.0.0.1"
+  cookie = "emqxsecretcookie"
+  data_dir = "/var/lib/emqx"
+}
+
+cluster {
+  name = emqxcl
+  discovery_strategy = manual
+}
+
+dashboard {
+  listeners {
+    http.bind = 18083
+  }
+}
+
+listeners.tcp.default {
+  bind = "0.0.0.0:1883"
+  max_connections = 1024000
+}
+
 authentication = [
   {
     mechanism = password_based
@@ -32,24 +59,23 @@ authentication = [
 
     method = post
     url = "${DJANGO_URL}/api/mqtt/auth/"
+    headers {
+      "Content-Type"  = "application/json"
+      "X-Hook-Secret" = "${HOOK_SECRET}"
+    }
     body {
       username = "\${username}"
       password = "\${password}"
       clientid = "\${clientid}"
     }
-    headers {
-      "Content-Type"  = "application/json"
-      "X-Hook-Secret" = "${HOOK_SECRET}"
-    }
-    connect_timeout    = 5s
-    request_timeout    = 5s
-    pool_size          = 8
-    enable_pipelining  = 100
-    ssl.enable         = false
+    connect_timeout   = 5s
+    request_timeout   = 5s
+    pool_size         = 8
+    enable_pipelining = 100
+    ssl.enable        = false
   }
 ]
 
-## HTTP Authorizer — verifică PUBLISH/SUBSCRIBE la nivel de topic
 authorization {
   no_match    = deny
   deny_action = disconnect
@@ -67,15 +93,15 @@ authorization {
 
       method = post
       url    = "${DJANGO_URL}/api/mqtt/acl/"
+      headers {
+        "Content-Type"  = "application/json"
+        "X-Hook-Secret" = "${HOOK_SECRET}"
+      }
       body {
         username = "\${username}"
         clientid = "\${clientid}"
         topic    = "\${topic}"
         action   = "\${action}"
-      }
-      headers {
-        "Content-Type"  = "application/json"
-        "X-Hook-Secret" = "${HOOK_SECRET}"
       }
       connect_timeout   = 5s
       request_timeout   = 5s
@@ -87,24 +113,12 @@ authorization {
 }
 CONF
 
-echo "[OK] Scris $OVERRIDE"
+echo "[OK] Config scris pe $EMQX_HOST"
 
-# Adaugă include în emqx.conf dacă nu există deja
-if ! grep -q "emqx-acl-override.conf" "$CONF_FILE"; then
-  echo "" | sudo tee -a "$CONF_FILE" > /dev/null
-  echo "include \"$OVERRIDE\"" | sudo tee -a "$CONF_FILE" > /dev/null
-  echo "[OK] Include adăugat în $CONF_FILE"
-else
-  echo "[SKIP] Include deja prezent în $CONF_FILE"
-fi
-
-# Restart EMQX
-echo "[..] Restart EMQX..."
-sudo systemctl restart emqx
-sleep 3
-sudo systemctl status emqx --no-pager | head -5
-
-echo ""
-echo "=== Done ==="
-echo "Testează cu:"
-echo "  curl -s -X POST $DJANGO_URL/api/mqtt/auth/ -H 'Content-Type: application/json' -d '{\"username\":\"SERIAL\",\"password\":\"\",\"clientid\":\"SERIAL\"}'"
+ssh -i "$SSH_KEY" "$EMQX_HOST" "
+  sudo emqx check_config && echo '[OK] Config valid'
+  sudo systemctl restart emqx
+  sleep 4
+  sudo emqx ping && echo '[OK] EMQX running'
+  ss -tlnp | grep 1883 && echo '[OK] Port 1883 open'
+"

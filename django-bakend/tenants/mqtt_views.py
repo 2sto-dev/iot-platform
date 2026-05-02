@@ -12,8 +12,8 @@ Response format (EMQX 5.x):
   {"result": "allow", "is_superuser": true} — bypasses ACL (service account)
 """
 import json
-import os
 
+from decouple import config
 from django.http import JsonResponse
 from django.utils.decorators import method_decorator
 from django.views import View
@@ -21,9 +21,10 @@ from django.views.decorators.csrf import csrf_exempt
 
 from clients.models import Device
 
-_SERVICE_USER = os.getenv("DJANGO_SERVICE_USER", "")
-_SERVICE_PASS = os.getenv("DJANGO_SERVICE_PASS", "")
-_HOOK_SECRET = os.getenv("MQTT_HOOK_SECRET", "")
+# Citim din .env via decouple (os.getenv nu vede .env-ul Django, decouple da).
+_SERVICE_USER = config("DJANGO_SERVICE_USER", default="")
+_SERVICE_PASS = config("DJANGO_SERVICE_PASS", default="")
+_HOOK_SECRET = config("MQTT_HOOK_SECRET", default="")
 
 _ALLOW = {"result": "allow"}
 _DENY = {"result": "deny"}

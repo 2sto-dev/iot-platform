@@ -9,6 +9,16 @@ from clients.models import Device
 from tenants.models import Membership, Tenant
 
 
+@pytest.fixture(autouse=True)
+def no_hook_secret():
+    """Disable hook-secret check in all tests (secret enforcement tested separately)."""
+    import tenants.mqtt_views as mv
+    original = mv._HOOK_SECRET
+    mv._HOOK_SECRET = ""
+    yield
+    mv._HOOK_SECRET = original
+
+
 @pytest.fixture
 def http():
     return DjangoClient()
@@ -78,8 +88,7 @@ def test_auth_bad_body_400(http, db):
     assert r.status_code == 400
 
 
-def test_auth_secret_enforced(http, device, settings):
-    settings.MQTT_HOOK_SECRET = None  # tested via env mock below
+def test_auth_secret_enforced(http, device):
     # Patch module-level _HOOK_SECRET directly
     import tenants.mqtt_views as mv
     original = mv._HOOK_SECRET
