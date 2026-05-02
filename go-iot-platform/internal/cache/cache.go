@@ -28,8 +28,9 @@ const (
 )
 
 type Entry struct {
-	Serial   string `json:"serial"`
-	TenantID int64  `json:"tenant_id"`
+	Serial     string `json:"serial"`
+	TenantID   int64  `json:"tenant_id"`
+	TenantPlan string `json:"tenant_plan"` // "free" | "pro" | "enterprise" (Faza 2.7)
 }
 
 type Cache struct {
@@ -121,6 +122,50 @@ func (c *Cache) GetDeviceTenant(ctx context.Context, serial string) (int64, bool
 	return 0, false
 }
 
+// GetDeviceInfo returnează Entry complet (tenant_id + plan) pentru un device serial.
+// Semantica miss/negative cache e identică cu GetDeviceTenant.
+func (c *Cache) GetDeviceInfo(ctx context.Context, serial string) (Entry, bool) {
+	// Negative cache
+	c.mu.RLock()
+	if exp, ok := c.negative[serial]; ok && time.Now().Before(exp) {
+		c.mu.RUnlock()
+		c.bumpStat(false)
+		return Entry{}, false
+	}
+	c.mu.RUnlock()
+
+	// Redis lookup
+	val, err := c.rdb.Get(ctx, keyPrefix+serial).Result()
+	if err == nil {
+		var e Entry
+		if jerr := json.Unmarshal([]byte(val), &e); jerr == nil {
+			c.bumpStat(true)
+			return e, true
+		}
+	}
+
+	// Miss → refresh
+	if err := c.refresh(ctx); err != nil {
+		c.bumpStat(false)
+		return Entry{}, false
+	}
+
+	val, err = c.rdb.Get(ctx, keyPrefix+serial).Result()
+	if err == nil {
+		var e Entry
+		if jerr := json.Unmarshal([]byte(val), &e); jerr == nil {
+			c.bumpStat(true)
+			return e, true
+		}
+	}
+
+	c.mu.Lock()
+	c.negative[serial] = time.Now().Add(c.negTTL)
+	c.mu.Unlock()
+	c.bumpStat(false)
+	return Entry{}, false
+}
+
 // refresh repopulează cache-ul cu lista completă de device-uri din Django.
 // Folosit la miss și ca warm-up la startup.
 func (c *Cache) refresh(ctx context.Context) error {
@@ -130,7 +175,11 @@ func (c *Cache) refresh(ctx context.Context) error {
 	}
 	pipe := c.rdb.Pipeline()
 	for _, d := range devices {
-		entry := Entry{Serial: d.Serial, TenantID: d.TenantID}
+		plan := d.TenantPlan
+		if plan == "" {
+			plan = "free"
+		}
+		entry := Entry{Serial: d.Serial, TenantID: d.TenantID, TenantPlan: plan}
 		b, _ := json.Marshal(entry)
 		pipe.Set(ctx, keyPrefix+d.Serial, string(b), c.ttl)
 	}

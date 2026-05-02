@@ -10,6 +10,9 @@ class DeviceSerializer(serializers.ModelSerializer):
     topics = serializers.SerializerMethodField()
     tenant = serializers.PrimaryKeyRelatedField(queryset=Tenant.objects.all(), required=False)
     client = serializers.PrimaryKeyRelatedField(queryset=get_user_model().objects.all(), required=False)
+    # Faza 2.7: plan-ul tenantului inclus în listarea device-urilor (read-only).
+    # Permite Go-ului să ruteze scrierile în Influx pe bucket-ul corect fără HTTP extra.
+    tenant_plan = serializers.CharField(source="tenant.plan", read_only=True, default="free")
 
     class Meta:
         model = Device
@@ -20,6 +23,7 @@ class DeviceSerializer(serializers.ModelSerializer):
             "device_type",
             "client",
             "tenant",
+            "tenant_plan",
             "topics",
         ]
         # tenant is injected by DeviceViewSet.perform_create from the JWT, not from payload.

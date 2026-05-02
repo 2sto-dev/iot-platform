@@ -38,9 +38,10 @@ type RefreshRequest struct {
 }
 
 type Device struct {
-	Serial   string   `json:"serial_number"`
-	Topics   []string `json:"topics"`
-	TenantID int64    `json:"tenant"`
+	Serial     string   `json:"serial_number"`
+	Topics     []string `json:"topics"`
+	TenantID   int64    `json:"tenant"`
+	TenantPlan string   `json:"tenant_plan"` // "free" | "pro" | "enterprise" (Faza 2.7)
 }
 
 type RegisterDeviceRequest struct {

@@ -17,7 +17,6 @@ import (
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
-	influxdb2api "github.com/influxdata/influxdb-client-go/v2/api"
 	"github.com/influxdata/influxdb-client-go/v2/api/write"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -60,17 +59,21 @@ func main() {
 		log.Fatalf("Eroare login Django: %v", err)
 	}
 
-	// Faza 2.5: WriteAPI async cu batching în loc de WriteAPIBlocking.
-	// BatchSize=5000, FlushInterval=1s → debit 10x+ pe single instance.
-	// Erorile sunt consumate dintr-un canal dedicat și loghate + buffer fallback.
+	// Faza 2.5: WriteAPI async cu batching; Faza 2.7: pool de WriteAPI per plan de tenant.
 	opts := influxdb2.DefaultOptions().
 		SetBatchSize(5000).
 		SetFlushInterval(1000) // ms
 	influxClient := influxdb2.NewClientWithOptions(influx.URL, influx.Token, opts)
 	defer influxClient.Close()
-	writeAPI := influxClient.WriteAPI(influx.Org, influx.Bucket)
+
+	poolErrCh := make(chan error, 32)
+	writePool := influx.NewWritePool(influxClient, influx.Org, influx.BucketConfig{
+		Free:       os.Getenv("INFLUX_BUCKET_FREE"),
+		Pro:        os.Getenv("INFLUX_BUCKET_PRO"),
+		Enterprise: os.Getenv("INFLUX_BUCKET_ENTERPRISE"),
+	}, poolErrCh)
 	go func() {
-		for err := range writeAPI.Errors() {
+		for err := range poolErrCh {
 			logging.Error("influx async write error", logging.Fields{"error": err.Error()})
 			if influxBuffer != nil {
 				_ = influxBuffer.Append("(async batch)", []byte("(batch error)"), err)
@@ -118,7 +121,7 @@ func main() {
 		log.Println("⚠️ REDIS_ADDR not set; cache disabled, fallback la GetAllDevices() per-message")
 	}
 
-	go startMQTTSubscriber(ctx, writeAPI)
+	go startMQTTSubscriber(ctx, writePool)
 
 	mux := http.NewServeMux()
 	api.RegisterRoutes(mux)
@@ -148,7 +151,7 @@ func main() {
 	}
 }
 
-func startMQTTSubscriber(ctx context.Context, writeAPI influxdb2api.WriteAPI) {
+func startMQTTSubscriber(ctx context.Context, pool *influx.WritePool) {
 	mqttBroker := os.Getenv("MQTT_BROKER")
 	mqttUsername := os.Getenv("MQTT_USER")
 	mqttPassword := os.Getenv("MQTT_PASS")
@@ -187,7 +190,7 @@ func startMQTTSubscriber(ctx context.Context, writeAPI influxdb2api.WriteAPI) {
 	opts.OnConnect = func(c mqtt.Client) {
 		for _, topic := range subscriptions {
 			if token := c.Subscribe(topic, 0, func(client mqtt.Client, msg mqtt.Message) {
-				go handleMessage(msg, writeAPI)
+				go handleMessage(msg, pool)
 			}); token.Wait() && token.Error() != nil {
 				log.Printf("Eroare la abonare topic %s: %v\n", topic, token.Error())
 			} else {
@@ -224,14 +227,13 @@ type SensorMessage struct {
 	ENERGY EnergyData `json:"ENERGY"`
 }
 
-// writePoint scrie un punct în Influx (fire-and-forget; erorile vin pe writeAPI.Errors()
-// channel consumat în main). Loghează enqueue-ul structurat.
-func writePoint(p *write.Point, writeAPI influxdb2api.WriteAPI, topic string, payload []byte, fields logging.Fields) {
-	writeAPI.WritePoint(p)
+// writePoint scrie un punct în Influx pe bucket-ul planului dat. Loghează enqueue-ul structurat.
+func writePoint(p *write.Point, pool *influx.WritePool, plan string, fields logging.Fields) {
+	pool.WritePoint(plan, p)
 	logging.Info("influx write enqueued", fields)
 }
 
-func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
+func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 	topic := msg.Topic()
 	payload := msg.Payload()
 
@@ -255,15 +257,19 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
 		return
 	}
 
-	// Faza 2.4: lookup via Redis cache (cu fallback la Django dacă cache nu e configurat)
+	// Faza 2.4 + 2.7: lookup device→tenant+plan via Redis cache sau fallback Django.
 	tenantTag := "unassigned"
+	tenantPlan := "free"
 	var deviceTenantID int64
 	found := false
 	if deviceCache != nil {
-		if tid, ok := deviceCache.GetDeviceTenant(context.Background(), deviceID); ok {
+		if entry, ok := deviceCache.GetDeviceInfo(context.Background(), deviceID); ok {
 			found = true
-			deviceTenantID = tid
-			tenantTag = cache.ParseTenantTag(tid)
+			deviceTenantID = entry.TenantID
+			tenantTag = cache.ParseTenantTag(entry.TenantID)
+			if entry.TenantPlan != "" {
+				tenantPlan = entry.TenantPlan
+			}
 		}
 	} else {
 		// Fallback path când Redis nu e disponibil — comportamentul pre-2.4 (slow dar funcțional).
@@ -274,6 +280,9 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
 				deviceTenantID = d.TenantID
 				if d.TenantID > 0 {
 					tenantTag = strconv.FormatInt(d.TenantID, 10)
+				}
+				if d.TenantPlan != "" {
+					tenantPlan = d.TenantPlan
 				}
 				break
 			}
@@ -327,7 +336,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
 			map[string]string{"device": deviceID, "source": "shelly", "type": "power_meter", "tenant_id": tenantTag},
 			map[string]interface{}{titleCaser.String(field): value},
 			time.Now())
-		writePoint(p, writeAPI, topic, payload, logging.Fields{
+		writePoint(p, pool, tenantPlan, logging.Fields{
 			"source": "shelly", "field": field, "value": value, "device_id": deviceID, "tenant_id": tenantTag,
 		})
 
@@ -341,7 +350,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
 			map[string]string{"device": deviceID, "source": "shelly", "type": "relay", "tenant_id": tenantTag},
 			map[string]interface{}{"state": state},
 			time.Now())
-		writePoint(p, writeAPI, topic, payload, logging.Fields{
+		writePoint(p, pool, tenantPlan, logging.Fields{
 			"source": "shelly", "type": "relay", "state": state, "device_id": deviceID, "tenant_id": tenantTag,
 		})
 
@@ -355,7 +364,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
 			map[string]string{"device": deviceID, "source": "nousat", "type": "state", "tenant_id": tenantTag},
 			map[string]interface{}{"POWER": state.POWER, "RSSI": state.RSSI},
 			time.Now())
-		writePoint(p, writeAPI, topic, payload, logging.Fields{
+		writePoint(p, pool, tenantPlan, logging.Fields{
 			"source": "nousat", "type": "state", "device_id": deviceID, "tenant_id": tenantTag,
 		})
 
@@ -378,7 +387,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
 				"Total":   sensor.ENERGY.Total,
 			},
 			t)
-		writePoint(p, writeAPI, topic, payload, logging.Fields{
+		writePoint(p, pool, tenantPlan, logging.Fields{
 			"source": "nousat", "type": "energy", "device_id": deviceID, "tenant_id": tenantTag,
 		})
 
@@ -392,7 +401,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
 			map[string]string{"device": deviceID, "source": "zigbee2mqtt", "type": "sensor", "tenant_id": tenantTag},
 			data,
 			time.Now())
-		writePoint(p, writeAPI, topic, payload, logging.Fields{
+		writePoint(p, pool, tenantPlan, logging.Fields{
 			"source": "zigbee2mqtt", "type": "sensor", "device_id": deviceID, "tenant_id": tenantTag,
 		})
 
@@ -403,7 +412,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
 				map[string]string{"device": deviceID, "source": "generic", "type": "auto_detected", "tenant_id": tenantTag},
 				data,
 				time.Now())
-			writePoint(p, writeAPI, topic, payload, logging.Fields{
+			writePoint(p, pool, tenantPlan, logging.Fields{
 				"source": "generic", "type": "auto_detected", "device_id": deviceID, "tenant_id": tenantTag,
 			})
 		} else {
@@ -418,7 +427,7 @@ func handleMessage(msg mqtt.Message, writeAPI influxdb2api.WriteAPI) {
 				map[string]string{"device": deviceID, "source": "generic", "type": "auto_detected", "tenant_id": tenantTag},
 				map[string]interface{}{"value": val},
 				time.Now())
-			writePoint(p, writeAPI, topic, payload, logging.Fields{
+			writePoint(p, pool, tenantPlan, logging.Fields{
 				"source": "generic", "type": "auto_detected_simple", "device_id": deviceID, "tenant_id": tenantTag,
 			})
 		}
