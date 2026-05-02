@@ -27,3 +27,7 @@ Thumbs.db
 
 # Build artifacts
 *.log
+# Harden ignore for nested logs/binaries (avoid accidental commits)
+**/logs/**
+go-iot-platform/bin/**
+go-iot-platform/bin/logs/**
