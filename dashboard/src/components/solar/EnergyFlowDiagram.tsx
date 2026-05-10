@@ -47,15 +47,16 @@ export function EnergyFlowDiagram({
   const gridSpeed = (importing || exporting) ? speed(Math.abs(gridPowerW!) / 1000) : "2";
   const houseSpeed = consuming ? speed(houseLoadKw!) : "2";
 
-  // ── Layout: viewBox 600 × 600, centru invizibil în (300, 300) ──────────
-  const cx = 300, cy = 300;
-  const nodeR = 56;
-  const ringW = 4;
+  // ── Layout: viewBox 640 × 660, centru invizibil în (320, 330) ──────────
+  // Cercuri mai mari (r=72) ca textul să fie spațios + lizibil.
+  const cx = 320, cy = 330;
+  const nodeR = 72;
+  const ringW = 5;
 
-  const pv = { x: 300, y: 90 };
-  const battery = { x: 110, y: 300 };
-  const grid = { x: 490, y: 300 };
-  const house = { x: 300, y: 510 };
+  const pv = { x: 320, y: 100 };
+  const battery = { x: 100, y: 330 };
+  const grid = { x: 540, y: 330 };
+  const house = { x: 320, y: 560 };
 
   return (
     <div className="bg-gradient-to-b from-sky-50 to-white border border-gray-200 rounded-xl p-6">
@@ -67,7 +68,7 @@ export function EnergyFlowDiagram({
         </span>
       </div>
 
-      <svg viewBox="0 0 600 620" className="w-full" style={{ maxHeight: 580 }}>
+      <svg viewBox="0 0 640 680" className="w-full" style={{ maxHeight: 620 }}>
         <defs>
           {/* Drop shadow soft pentru cercuri */}
           <filter id="node-shadow" x="-30%" y="-30%" width="160%" height="160%">
@@ -277,13 +278,25 @@ function CircleNode({
   label: string;
   badge?: string | null;
 }) {
+  // Typography spacing — cercul are r=72, conținut interior 144px diametru.
+  // Distribuim: icon (sus, ~y=-30), value (mare, y=+5), unit (y=+24).
+  const ICON_Y = -32;          // top of icon (translateY)
+  const VALUE_Y = 8;           // baseline value (relative to cy)
+  const UNIT_Y = 28;           // baseline unit
+  const LABEL_Y_OFFSET = 26;   // label distance under circle bottom
+  const VALUE_FONT = 22;       // mare, prominent
+  const UNIT_FONT = 12;
+  const LABEL_FONT = 15;
+
+  const isEmpty = value === "—";
+
   return (
     <g>
       {/* Halo glow când activ */}
       {haloId && (
-        <circle cx={cx} cy={cy} r={r + 14} fill={`url(#${haloId})`} pointerEvents="none" />
+        <circle cx={cx} cy={cy} r={r + 16} fill={`url(#${haloId})`} pointerEvents="none" />
       )}
-      {/* Inel exterior */}
+      {/* Cerc alb cu inel colorat + drop shadow */}
       <circle
         cx={cx} cy={cy} r={r}
         fill="white"
@@ -291,58 +304,68 @@ function CircleNode({
         strokeWidth={ringW}
         filter="url(#node-shadow)"
       />
-      {/* Icon */}
-      <g transform={`translate(${cx - 12}, ${cy - 24})`} style={{ color: ringColor }}>
+      {/* Icon — sus, în culoarea inelului (currentColor inherit) */}
+      <g transform={`translate(${cx - 14}, ${cy + ICON_Y})`} style={{ color: ringColor }}>
         {icon}
       </g>
       {/* Value (mare, bold) */}
       <text
-        x={cx} y={cy + 8}
+        x={cx} y={cy + VALUE_Y}
         textAnchor="middle"
-        fontSize="14"
-        fontWeight="700"
-        fill="#0f172a"
+        fontSize={VALUE_FONT}
+        fontWeight="800"
+        fill={isEmpty ? "#cbd5e1" : "#0f172a"}
         fontFamily="ui-sans-serif, system-ui"
+        style={{ letterSpacing: "-0.5px" }}
       >
         {value}
       </text>
-      {/* Unit */}
+      {/* Unit (sub value) */}
       <text
-        x={cx} y={cy + 22}
+        x={cx} y={cy + UNIT_Y}
         textAnchor="middle"
-        fontSize="10"
+        fontSize={UNIT_FONT}
         fill="#64748b"
-        fontWeight="500"
+        fontWeight="600"
+        fontFamily="ui-sans-serif"
+        style={{ letterSpacing: "0.5px" }}
       >
         {unit}
       </text>
-      {/* Badge SOC pentru Battery */}
+      {/* Badge SOC (overlay pe inelul de sus al cercului Battery) */}
       {badge && (
         <g>
-          <rect x={cx - 18} y={cy - r - 11} width="36" height="18" rx="9"
-                fill={ringColor} />
+          <rect
+            x={cx - 24} y={cy - r - 12}
+            width="48" height="22" rx="11"
+            fill={ringColor}
+            stroke="white" strokeWidth="2"
+            filter="url(#node-shadow)"
+          />
           <text
-            x={cx} y={cy - r + 2}
+            x={cx} y={cy - r + 3}
             textAnchor="middle"
-            fontSize="10"
-            fontWeight="700"
+            fontSize="12"
+            fontWeight="800"
             fill="white"
             fontFamily="ui-sans-serif"
+            style={{ letterSpacing: "0.3px" }}
           >
             {badge}
           </text>
         </g>
       )}
-      {/* Label sub cerc */}
+      {/* Label sub cerc — uppercase pentru lizibilitate */}
       <text
-        x={cx} y={cy + r + 22}
+        x={cx} y={cy + r + LABEL_Y_OFFSET}
         textAnchor="middle"
-        fontSize="13"
-        fontWeight="600"
-        fill="#475569"
+        fontSize={LABEL_FONT}
+        fontWeight="700"
+        fill="#334155"
         fontFamily="ui-sans-serif"
+        style={{ letterSpacing: "0.8px" }}
       >
-        {label}
+        {label.toUpperCase()}
       </text>
     </g>
   );
