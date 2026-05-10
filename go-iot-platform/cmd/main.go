@@ -452,6 +452,8 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 
 	} else if strings.HasSuffix(strings.ToLower(topic), "/state") {
 		// Tasmota STATE — accepta atat /STATE original cat si /state lowercase (bridge).
+		// IMPORTANT: NU scriem `power` aici (conflict de tip cu SENSOR power=float).
+		// Folosim `relay_state` (string ON/OFF) pentru releu si pastram `rssi` numeric.
 		var state StateMessage
 		if err := json.Unmarshal(payload, &state); err != nil {
 			logging.Drop("parse STATE failed", logging.Fields{"error": err.Error(), "topic": topic, "device_id": deviceID})
@@ -459,7 +461,7 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 		}
 		p := influxdb2.NewPoint("devices",
 			map[string]string{"device": deviceID, "source": "nousat", "type": "state", "tenant_id": tenantTag},
-			map[string]interface{}{"power": state.POWER, "rssi": state.RSSI},
+			map[string]interface{}{"relay_state": state.POWER, "rssi": state.RSSI},
 			time.Now())
 		writePoint(p, pool, tenantPlan, logging.Fields{
 			"source": "nousat", "type": "state", "device_id": deviceID, "tenant_id": tenantTag,

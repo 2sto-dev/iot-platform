@@ -11,6 +11,8 @@ interface Device {
   device_type: string;
 }
 
+// `relay_state` e string ON/OFF de la STATE topic — useDeviceMetrics îl ignora
+// (returneaza number|null), deci e OK sa nu-l listam. ON/OFF derivam din `power > 1W`.
 const FIELDS = ["power", "voltage", "current", "total", "today", "yesterday", "power_factor", "rssi"];
 
 export default function BoilerPage() {
