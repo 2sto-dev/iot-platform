@@ -13,3 +13,4 @@ paho-mqtt==2.1.0
 drf-spectacular==0.28.0
 requests==2.33.1
 django-cors-headers==4.9.0
+PyYAML==6.0.3

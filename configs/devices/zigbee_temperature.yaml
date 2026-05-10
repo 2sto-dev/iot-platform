@@ -29,9 +29,10 @@ parser:
   # {"temperature":21.5,"humidity":56,"battery":85,"linkquality":42,"voltage":3000}
 
 capabilities:
-  - temperature_sensor
-  - humidity_sensor
+  # climate_sensor compose-uieste temperature_sensor + humidity_sensor.
+  - climate_sensor
   - battery_powered
+  - zigbee
 
 normalized_fields:
   temperature_c:

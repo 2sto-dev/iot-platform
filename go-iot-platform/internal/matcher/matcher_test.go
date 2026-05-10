@@ -19,7 +19,7 @@ func ddWith(id string, patterns ...registry.TopicMatchSpec) *registry.DeviceDefi
 			TopicMatch: patterns,
 		},
 		Parser:       registry.ParserSpec{Type: "json"},
-		Capabilities: []string{"test"},
+		Capabilities: []string{"relay"}, // canonical capability (vocab gating Faza 5)
 	}
 }
 

@@ -7,15 +7,18 @@ interface Device {
   id: number;
   serial_number: string;
   device_type: string;
+  capabilities?: string[]; // Faza 5: capabilities (declared + inherited)
 }
 
+// Faza 5: filtrare bazată pe capability semantic în loc de device_type vendor.
+// Adăugare device nou cu capability=`inverter` → apare automat pe Solar fără modificare cod.
 const allLinks = [
-  { to: "/devices", label: "Devices", requireDevice: null },
-  { to: "/solar", label: "Solar", requireDevice: "sun2000" },
-  { to: "/boiler", label: "Boiler", requireDevice: "nous_at" },
-  { to: "/rules", label: "Rules", requireDevice: null },
-  { to: "/notifications", label: "Notifications", requireDevice: null },
-  { to: "/audit", label: "Audit Log", requireDevice: null },
+  { to: "/devices", label: "Devices", requireCapability: null },
+  { to: "/solar", label: "Solar", requireCapability: "inverter" },
+  { to: "/boiler", label: "Boiler", requireCapability: "smart_plug" },
+  { to: "/rules", label: "Rules", requireCapability: null },
+  { to: "/notifications", label: "Notifications", requireCapability: null },
+  { to: "/audit", label: "Audit Log", requireCapability: null },
 ];
 
 export default function Layout() {
@@ -26,8 +29,8 @@ export default function Layout() {
   });
 
   const links = allLinks.filter((link) => {
-    if (!link.requireDevice) return true;
-    return devices.some((d) => d.device_type === link.requireDevice);
+    if (!link.requireCapability) return true;
+    return devices.some((d) => (d.capabilities ?? []).includes(link.requireCapability!));
   });
 
   return (

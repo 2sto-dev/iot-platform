@@ -26,6 +26,7 @@ class DeviceSerializer(serializers.ModelSerializer):
             "tenant",
             "tenant_plan",
             "topics",
+            "capabilities",  # Faza 5: lista capabilities (declarate + inherited)
         ]
         # tenant is injected by DeviceViewSet.perform_create from the JWT, not from payload.
         # Auto-generated UniqueTogetherValidator(tenant, serial_number) would mark tenant as

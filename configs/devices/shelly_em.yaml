@@ -55,8 +55,10 @@ parser:
   # Faza 4 raw parser va folosi ultimul segment al topicului ca field name.
 
 capabilities:
-  - power_meter
+  # smart_meter inherit power_meter; păstrăm doar smart_meter ca să fie minimal.
   - smart_meter
+  - mains_powered
+  - wifi
 
 normalized_fields:
   active_power_w:

@@ -40,9 +40,11 @@ parser:
   # din top-level + sub-objects (ENERGY.Power → power, etc.) via Faza 4 logic.
 
 capabilities:
-  - relay
-  - power_meter
+  # smart_plug compose-uieste relay + power_meter prin inheritance
+  # (vezi internal/capabilities/inheritance.go).
   - smart_plug
+  - mains_powered
+  - wifi
 
 # Maparea Tasmota nested ENERGY.* → field-uri canonice flat.
 # Faza 4 parser engine va aplica path-uri JSON pentru extract.

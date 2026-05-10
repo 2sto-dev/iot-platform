@@ -89,7 +89,32 @@ class DeviceViewSet(viewsets.ModelViewSet):
         username = self.request.query_params.get("username")
         if username:
             qs = qs.filter(client__username=username)
+
+        # Faza 5: filtrare pe capability (capabilities e JSONField listă).
+        # Strategie DB-agnostic: pe MySQL 8+ folosim JSON_CONTAINS, altfel filter
+        # in-memory post-query (acceptabil pt N < 1000 device-uri per tenant).
+        capability = self.request.query_params.get("capability")
+        if capability:
+            qs = self._filter_by_capability(qs, capability)
+
         return qs
+
+    @staticmethod
+    def _filter_by_capability(qs, capability):
+        """Filter pe JSONField listă, compatibil MySQL + SQLite (pt teste)."""
+        from django.db import connection
+        vendor = connection.vendor
+        if vendor == "mysql":
+            # MySQL 8+: JSON_CONTAINS suportat nativ. Cast capability la string JSON.
+            from django.db.models.expressions import RawSQL
+            return qs.extra(
+                where=["JSON_CONTAINS(capabilities, %s)"],
+                params=[f'"{capability}"'],
+            )
+        # SQLite/Postgres fallback: in-memory filter (eval queryset).
+        # Nu ideal pt scale, dar correctness în teste e prioritar.
+        ids = [d.id for d in qs if capability in (d.capabilities or [])]
+        return qs.filter(id__in=ids)
 
     def perform_create(self, serializer):
         user = self.request.user

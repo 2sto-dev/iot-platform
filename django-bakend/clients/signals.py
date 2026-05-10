@@ -13,7 +13,7 @@ import json
 import logging
 
 from django.conf import settings
-from django.db.models.signals import post_delete, post_save
+from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
 from .models import Device
@@ -55,6 +55,24 @@ def _publish(serial: str):
         rdb.publish(INVALIDATE_CHANNEL, json.dumps({"serial": serial}))
     except Exception as e:
         logger.warning("publish invalidation eșuat pentru %s: %s", serial, e)
+
+
+@receiver(pre_save, sender=Device)
+def _populate_capabilities(sender, instance, **kwargs):
+    """Faza 5: populează `Device.capabilities` din YAML DD în funcție de device_type.
+
+    Idempotent: dacă capabilities sunt deja setate (non-empty și diferite de [None]),
+    nu le suprascriem (caller-ul poate seta manual capabilities specifice tenant).
+    """
+    if instance.capabilities:
+        return  # explicit set; no override
+    try:
+        from .dd_loader import get_capabilities_for_device_type
+        caps = get_capabilities_for_device_type(instance.device_type)
+        if caps:
+            instance.capabilities = caps
+    except Exception as exc:
+        logger.warning("dd_loader unavailable for %s: %s", instance.serial_number, exc)
 
 
 @receiver(post_save, sender=Device)

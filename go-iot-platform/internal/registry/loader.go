@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"go-iot-platform/internal/capabilities"
 	"gopkg.in/yaml.v3"
 )
 
@@ -94,6 +95,14 @@ func loadFile(path string) (*DeviceDefinition, error) {
 	if err := dd.Validate(); err != nil {
 		return nil, fmt.Errorf("validate: %w", err)
 	}
+
+	// Faza 5: expandeaza capabilities prin inheritance map.
+	// ResolveStrict respinge capabilities necunoscute (vocab gating).
+	resolved, err := capabilities.ResolveStrict(dd.Capabilities)
+	if err != nil {
+		return nil, fmt.Errorf("capabilities resolve: %w", err)
+	}
+	dd.ResolvedCapabilities = resolved
 
 	return &dd, nil
 }

@@ -54,8 +54,9 @@ type DeviceDefinition struct {
 	TelemetryStreams map[string]StreamSpec  `yaml:"telemetry_streams,omitempty" json:"telemetry_streams,omitempty"`
 
 	// Internal — populat de loader la încărcare, nu prezent în YAML.
-	SourcePath string    `yaml:"-" json:"source_path,omitempty"`
-	LoadedAt   time.Time `yaml:"-" json:"loaded_at,omitempty"`
+	SourcePath           string    `yaml:"-" json:"source_path,omitempty"`
+	LoadedAt             time.Time `yaml:"-" json:"loaded_at,omitempty"`
+	ResolvedCapabilities []string  `yaml:"-" json:"resolved_capabilities,omitempty"` // Capabilities + inherited (Faza 5)
 }
 
 // IdentificationSpec — reguli pentru a lega un mesaj MQTT primit de acest DD.
@@ -182,12 +183,20 @@ func (r *Registry) Count() int {
 	return len(r.defs)
 }
 
-// ByCapability returns all definitions that declare the given capability.
-// Used by Faza 5 Capability Engine — exposed here for test scaffolding.
+// ByCapability returns all definitions that declare OR inherit the given capability.
+// Folosește ResolvedCapabilities populat la load (Faza 5 inheritance expansion).
+//
+// Exemplu: ByCapability("relay") returneaza atât DD-uri care declară "relay" direct,
+// cat și cele care declară "smart_plug" (inherit relay) sau "ev_charger" etc.
 func (r *Registry) ByCapability(cap string) []*DeviceDefinition {
 	var out []*DeviceDefinition
 	for _, dd := range r.defs {
-		for _, c := range dd.Capabilities {
+		// Preferăm Resolved (include inheritance) dacă e populat.
+		caps := dd.ResolvedCapabilities
+		if len(caps) == 0 {
+			caps = dd.Capabilities // fallback pentru DD-uri vechi nepopulate
+		}
+		for _, c := range caps {
 			if c == cap {
 				out = append(out, dd)
 				break

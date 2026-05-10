@@ -63,10 +63,13 @@ parser:
   measurement_value_field: value
 
 capabilities:
-  - inverter
-  - battery
+  # hybrid_inverter compose-uieste inverter + battery prin inheritance.
+  - hybrid_inverter
   - power_meter
   - solar_pv
+  - mains_powered
+  - wifi
+  - modbus_tcp
 
 # Mapare vendor field → canonical name (Faza 4 normalize layer).
 # La query, frontend cere `solar_power_kw`, primește valoarea de la `pv_input_power`.

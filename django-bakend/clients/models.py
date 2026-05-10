@@ -32,6 +32,10 @@ class Device(models.Model):
     device_type = models.CharField(max_length=20, choices=DEVICE_CHOICES)
     # Faza 3.1: hash BCrypt al parolei MQTT per-device. Gol = auth fără parolă (compat).
     mqtt_password_hash = models.CharField(max_length=128, blank=True)
+    # Faza 5: capabilities denormalizate din Device Definition YAML.
+    # Populat la save() prin signals.py + management command sync_capabilities.
+    # Lista include atât capabilities declarate cât și cele inherited (smart_plug -> relay + power_meter).
+    capabilities = models.JSONField(default=list, blank=True)
 
     objects = TenantQuerySet.as_manager()
 
@@ -40,6 +44,10 @@ class Device(models.Model):
 
     def __str__(self):
         return f"{self.serial_number} - {self.get_device_type_display()} ({self.client.username})"
+
+    def has_capability(self, cap: str) -> bool:
+        """Verifică dacă device-ul are capability (declarat sau inherited)."""
+        return cap in (self.capabilities or [])
 
 
 class DeviceShadow(models.Model):
