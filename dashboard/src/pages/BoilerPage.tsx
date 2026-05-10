@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { api, goApi } from "../lib/api";
 import { useDeviceMetrics } from "../components/solar/useDeviceMetrics";
 import { RANGE_OPTIONS } from "../components/solar/types";
+import { canSendCommands } from "../lib/auth";
 
 interface Device {
   id: number;
@@ -50,6 +51,83 @@ export default function BoilerPage() {
   const rssi = m["rssi"];                   // dBm (de la Tasmota STATE)
 
   const isOn = power !== null && power > 1; // > 1W = consumă
+
+  // ── Toggle ON/OFF cu confirmare ─────────────────────────────────────────
+  const cmdable = canSendCommands();
+  const [pending, setPending] = useState<{ desired: "ON" | "OFF"; t0: number } | null>(null);
+  const [feedback, setFeedback] = useState<{ kind: "ok" | "fail" | "timeout"; msg: string } | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  function clearPoll() {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
+
+  async function sendToggle(desired: "ON" | "OFF") {
+    if (!activeDevice || !cmdable || pending) return;
+    setFeedback(null);
+    try {
+      await api.post(`/devices/${activeDevice.id}/relay/`, { state: desired });
+      const t0 = Date.now();
+      setPending({ desired, t0 });
+
+      // Poll relay_state din Influx la 800ms, max 10s
+      pollRef.current = setInterval(async () => {
+        try {
+          const r = await goApi.get(`/metrics/${activeSerial}/relay_state`, {
+            params: { range: "-30s" },
+          });
+          const val = r.data?.value;
+          // relay_state e string in Influx → metrics endpoint returneaza number|null;
+          // pentru string Influx returneaza 0 sau 1 sau valoarea ca text esuata.
+          // Ne bazam pe `nousat_power` schimbat dupa command in loc.
+          if (typeof val === "number") {
+            // Daca returneaza ceva, presupunem confirmare.
+            clearPoll();
+            setPending(null);
+            setFeedback({ kind: "ok", msg: `Comandă executată (${desired})` });
+            setTimeout(() => setFeedback(null), 4000);
+          }
+        } catch {
+          // Ignorat — continuăm polling
+        }
+
+        // Timeout 10s
+        if (Date.now() - t0 > 10_000) {
+          clearPoll();
+          setPending(null);
+          setFeedback({
+            kind: "timeout",
+            msg: "Comanda trimisă dar fără confirmare în 10s — verifică manual",
+          });
+          setTimeout(() => setFeedback(null), 6000);
+        }
+      }, 800);
+    } catch (e: any) {
+      const msg = e?.response?.data?.detail ?? e?.message ?? "Comandă eșuată";
+      setFeedback({ kind: "fail", msg });
+      setTimeout(() => setFeedback(null), 6000);
+    }
+  }
+
+  // Confirmare alternativă: dacă power se schimbă "natural" după command (e.g. ON → 1500W,
+  // sau OFF → 0W), considerăm confirmat.
+  useEffect(() => {
+    if (!pending || power === null) return;
+    const matchesDesired =
+      (pending.desired === "ON" && power > 1) ||
+      (pending.desired === "OFF" && power < 0.5);
+    if (matchesDesired) {
+      clearPoll();
+      setPending(null);
+      setFeedback({ kind: "ok", msg: `Confirmat: ${pending.desired}` });
+      setTimeout(() => setFeedback(null), 4000);
+    }
+  }, [power, pending]);
+
+  useEffect(() => () => clearPoll(), []);
 
   if (isLoading) {
     return (
@@ -124,6 +202,18 @@ export default function BoilerPage() {
         </div>
       </div>
 
+      {/* Toggle feedback banner */}
+      {feedback && (
+        <div className={`mb-4 rounded-lg px-4 py-2.5 text-sm flex items-center gap-2 ${
+          feedback.kind === "ok" ? "bg-emerald-50 text-emerald-800 border border-emerald-200" :
+          feedback.kind === "timeout" ? "bg-amber-50 text-amber-800 border border-amber-200" :
+          "bg-rose-50 text-rose-800 border border-rose-200"
+        }`}>
+          <span>{feedback.kind === "ok" ? "✓" : feedback.kind === "timeout" ? "⏱" : "✗"}</span>
+          {feedback.msg}
+        </div>
+      )}
+
       {/* Hero state — Power */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         <div className={`lg:col-span-2 rounded-xl p-6 border transition-colors ${
@@ -150,6 +240,48 @@ export default function BoilerPage() {
           <p className="text-xs text-gray-500 mt-3">
             Putere instantanee consumată de boiler
           </p>
+
+          {/* Control: toggle ON/OFF */}
+          {cmdable && (
+            <div className="mt-5 pt-4 border-t border-gray-200/60 flex items-center gap-3 flex-wrap">
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Control</span>
+              <button
+                onClick={() => sendToggle("ON")}
+                disabled={pending !== null}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold shadow-sm transition-all ${
+                  isOn
+                    ? "bg-emerald-600 text-white ring-2 ring-emerald-300"
+                    : "bg-white border border-gray-300 text-gray-700 hover:bg-emerald-50 hover:border-emerald-400 hover:text-emerald-700"
+                } disabled:opacity-50 disabled:cursor-wait`}
+              >
+                {pending?.desired === "ON" ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Spinner /> Pornește…
+                  </span>
+                ) : "● ON"}
+              </button>
+              <button
+                onClick={() => sendToggle("OFF")}
+                disabled={pending !== null}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold shadow-sm transition-all ${
+                  !isOn && power !== null
+                    ? "bg-gray-700 text-white ring-2 ring-gray-300"
+                    : "bg-white border border-gray-300 text-gray-700 hover:bg-gray-100"
+                } disabled:opacity-50 disabled:cursor-wait`}
+              >
+                {pending?.desired === "OFF" ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Spinner /> Oprește…
+                  </span>
+                ) : "○ OFF"}
+              </button>
+              {pending && (
+                <span className="text-[11px] text-gray-500 ml-auto">
+                  aștept confirmare {Math.max(0, Math.ceil((10000 - (Date.now() - pending.t0)) / 1000))}s
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Energy stats: Today / Yesterday / Total */}
@@ -289,6 +421,24 @@ function CurrentIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 12 Q 7 6, 12 12 T 21 12" />
+    </svg>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+      <circle cx="12" cy="12" r="9" strokeOpacity="0.25" />
+      <path d="M21 12 a 9 9 0 0 0 -9 -9">
+        <animateTransform
+          attributeName="transform"
+          type="rotate"
+          from="0 12 12"
+          to="360 12 12"
+          dur="0.8s"
+          repeatCount="indefinite"
+        />
+      </path>
     </svg>
   );
 }

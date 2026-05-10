@@ -30,6 +30,47 @@ def _parse_broker(broker_str: str):
     return s, 1883
 
 
+def publish_raw(topic: str, payload: str, retain: bool = False, qos: int = 1) -> bool:
+    """Publica un mesaj MQTT cu payload string brut, pe topic arbitrar.
+
+    Folosit pentru comenzi vendor-specific (ex: Tasmota cmnd/<id>/POWER ON).
+    Returneaza True daca publish a reusit, False altfel (broker missing / error).
+    """
+    broker = getattr(settings, "MQTT_BROKER", "")
+    if not broker:
+        logger.warning("MQTT_BROKER not configured; publish_raw no-op for %s", topic)
+        return False
+
+    try:
+        import paho.mqtt.publish as mqttpublish
+    except ImportError:
+        logger.warning("paho-mqtt nu e instalat; publish_raw skip")
+        return False
+
+    host, port = _parse_broker(broker)
+    auth = None
+    user = getattr(settings, "MQTT_SERVICE_USER", "")
+    passwd = getattr(settings, "MQTT_SERVICE_PASS", "")
+    if user:
+        auth = {"username": user, "password": passwd}
+
+    try:
+        mqttpublish.single(
+            topic,
+            payload=payload,
+            retain=retain,
+            qos=qos,
+            hostname=host,
+            port=port,
+            auth=auth,
+        )
+        logger.info("mqtt publish OK: %s = %r", topic, payload)
+        return True
+    except Exception as exc:
+        logger.warning("mqtt publish failed topic=%s: %s", topic, exc)
+        return False
+
+
 def publish_shadow_delta(device, delta: dict) -> None:
     """Publică delta ca retained message pe tenants/{tid}/devices/{serial}/down/shadow.
 

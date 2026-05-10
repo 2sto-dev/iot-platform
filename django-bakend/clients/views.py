@@ -136,6 +136,55 @@ class DeviceViewSet(viewsets.ModelViewSet):
         device.save(update_fields=["mqtt_password_hash"])
         return Response({"serial_number": device.serial_number, "mqtt_password": plain})
 
+    @action(detail=True, methods=["post"], url_path="relay")
+    def relay(self, request, pk=None):
+        """POST /api/devices/{id}/relay/ — comanda ON/OFF/TOGGLE pentru Tasmota.
+
+        Body: {"state": "ON" | "OFF" | "TOGGLE"}
+
+        Publica MQTT pe `cmnd/{serial}/Backlog` cu `POWER {state}; STATE; SENSOR` —
+        ultimele doua forteaza Tasmota sa publice imediat tele/STATE si tele/SENSOR
+        ca dashboard-ul sa primeasca confirmarea in <2s, nu sa astepte TelePeriod.
+
+        Roluri permise: OWNER, ADMIN, OPERATOR.
+        """
+        device = self.get_object()
+        if device.device_type != "nous_at":
+            return Response(
+                {"detail": "Relay control supported only for Tasmota / Nous A1T devices."},
+                status=400,
+            )
+
+        role = getattr(request, "role", None)
+        if not _is_cross_tenant(request.user) and role not in {"OWNER", "ADMIN", "OPERATOR"}:
+            raise PermissionDenied("OWNER, ADMIN sau OPERATOR pentru a controla releul.")
+
+        state = (request.data.get("state") or "").upper().strip()
+        if state not in {"ON", "OFF", "TOGGLE"}:
+            return Response(
+                {"detail": "state must be ON, OFF, or TOGGLE"},
+                status=400,
+            )
+
+        from .mqtt_publisher import publish_raw
+        topic = f"cmnd/{device.serial_number}/Backlog"
+        payload = f"POWER {state}; STATE; SENSOR"
+
+        ok = publish_raw(topic, payload)
+        if not ok:
+            return Response(
+                {"detail": "MQTT publish failed (broker unreachable or not configured)"},
+                status=503,
+            )
+
+        from django.utils import timezone
+        return Response({
+            "device": device.serial_number,
+            "command": payload,
+            "topic": topic,
+            "issued_at": timezone.now().isoformat(),
+        }, status=202)
+
 
 class DeviceShadowView(generics.RetrieveUpdateAPIView):
     """GET/PATCH /api/devices/{pk}/shadow/
