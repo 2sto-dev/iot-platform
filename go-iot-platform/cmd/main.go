@@ -221,10 +221,15 @@ type StateMessage struct {
 }
 
 type EnergyData struct {
-	Total   float64 `json:"Total"`
-	Power   float64 `json:"Power"`
-	Voltage float64 `json:"Voltage"`
-	Current float64 `json:"Current"`
+	Total          float64 `json:"Total"`
+	Today          float64 `json:"Today"`
+	Yesterday      float64 `json:"Yesterday"`
+	Power          float64 `json:"Power"`
+	ApparentPower  float64 `json:"ApparentPower"`
+	ReactivePower  float64 `json:"ReactivePower"`
+	Factor         float64 `json:"Factor"`
+	Voltage        float64 `json:"Voltage"`
+	Current        float64 `json:"Current"`
 }
 
 type SensorMessage struct {
@@ -474,10 +479,15 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 		p := influxdb2.NewPoint("devices",
 			map[string]string{"device": deviceID, "source": "nousat", "type": "energy", "tenant_id": tenantTag},
 			map[string]interface{}{
-				"power":   sensor.ENERGY.Power,
-				"voltage": sensor.ENERGY.Voltage,
-				"current": sensor.ENERGY.Current,
-				"total":   sensor.ENERGY.Total,
+				"power":          sensor.ENERGY.Power,
+				"apparent_power": sensor.ENERGY.ApparentPower,
+				"reactive_power": sensor.ENERGY.ReactivePower,
+				"power_factor":   sensor.ENERGY.Factor,
+				"voltage":        sensor.ENERGY.Voltage,
+				"current":        sensor.ENERGY.Current,
+				"total":          sensor.ENERGY.Total,
+				"today":          sensor.ENERGY.Today,
+				"yesterday":      sensor.ENERGY.Yesterday,
 			},
 			t)
 		writePoint(p, pool, tenantPlan, logging.Fields{

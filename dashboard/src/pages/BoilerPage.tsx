@@ -11,7 +11,7 @@ interface Device {
   device_type: string;
 }
 
-const FIELDS = ["power", "voltage", "current", "total", "rssi"];
+const FIELDS = ["power", "voltage", "current", "total", "today", "yesterday", "power_factor", "rssi"];
 
 export default function BoilerPage() {
   const [selectedSerial, setSelectedSerial] = useState<string | null>(null);
@@ -32,11 +32,14 @@ export default function BoilerPage() {
   const activeDevice = nousat.find((d) => d.serial_number === activeSerial);
 
   const { values: m } = useDeviceMetrics(activeSerial, FIELDS, range);
-  const power = m["power"];      // W
-  const voltage = m["voltage"];  // V
-  const current = m["current"];  // A
-  const total = m["total"];      // kWh
-  const rssi = m["rssi"];        // dBm (de la Tasmota STATE)
+  const power = m["power"];          // W
+  const voltage = m["voltage"];      // V
+  const current = m["current"];      // A
+  const total = m["total"];          // kWh lifetime
+  const today = m["today"];          // kWh azi (resetează la 00:00)
+  const yesterday = m["yesterday"];  // kWh ieri
+  const powerFactor = m["power_factor"];
+  const rssi = m["rssi"];            // dBm (de la Tasmota STATE)
 
   const isOn = power !== null && power > 1; // > 1W = consumă
 
@@ -141,23 +144,38 @@ export default function BoilerPage() {
           </p>
         </div>
 
-        {/* Total energy */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6 flex flex-col justify-center">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Total energy</h3>
-          <p className="flex items-baseline gap-1.5">
-            <span className="text-3xl font-bold tabular-nums text-gray-900">
-              {total !== null ? total.toFixed(2) : "—"}
-            </span>
-            <span className="text-sm font-medium text-gray-500">kWh</span>
-          </p>
-          <p className="text-[11px] text-gray-400 mt-2">
-            Lifetime consumption since install
-          </p>
+        {/* Energy stats: Today / Yesterday / Total */}
+        <div className="bg-white border border-gray-200 rounded-xl p-6 flex flex-col justify-center space-y-3">
+          <div>
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Today</h3>
+            <p className="flex items-baseline gap-1.5 mt-1">
+              <span className="text-2xl font-bold tabular-nums text-emerald-700">
+                {today !== null ? today.toFixed(3) : "—"}
+              </span>
+              <span className="text-sm font-medium text-gray-500">kWh</span>
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 pt-3 border-t border-gray-100">
+            <div>
+              <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Yesterday</p>
+              <p className="text-base font-bold tabular-nums text-gray-700 mt-0.5">
+                {yesterday !== null ? yesterday.toFixed(2) : "—"}
+                <span className="text-[10px] font-medium text-gray-400 ml-1">kWh</span>
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Total</p>
+              <p className="text-base font-bold tabular-nums text-gray-700 mt-0.5">
+                {total !== null ? total.toFixed(1) : "—"}
+                <span className="text-[10px] font-medium text-gray-400 ml-1">kWh</span>
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Voltage / Current / RSSI */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      {/* Voltage / Current / Power Factor / RSSI */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <MetricMini
           label="Voltage"
           value={voltage}
@@ -173,6 +191,14 @@ export default function BoilerPage() {
           decimals={2}
           accent="amber"
           icon={<CurrentIcon />}
+        />
+        <MetricMini
+          label="Power factor"
+          value={powerFactor}
+          unit=""
+          decimals={2}
+          accent="emerald"
+          icon={<PowerFactorIcon />}
         />
         <MetricMini
           label="WiFi signal"
@@ -255,6 +281,15 @@ function CurrentIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 12 Q 7 6, 12 12 T 21 12" />
+    </svg>
+  );
+}
+
+function PowerFactorIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12 L21 12 M12 3 L12 21" strokeOpacity="0.4" />
     </svg>
   );
 }
