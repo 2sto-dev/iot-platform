@@ -1,0 +1,121 @@
+# Nous A1T smart plug — Tasmota firmware.
+# Single-phase relay + energy meter (boiler / appliance monitoring).
+
+schema_version: "1.0"
+id: nous_a1t
+name: "Nous A1T Smart Plug"
+vendor: nous
+model: A1T
+description: "WiFi smart plug with energy monitoring (Tasmota firmware). 16A max."
+
+protocol: mqtt
+
+identification:
+  topic_match:
+    # Tasmota tele/<topic>/SENSOR — energy data every TelePeriod
+    - pattern: "tele/+/SENSOR"
+      extract:
+        device_id: "$1"
+    # Tasmota tele/<topic>/STATE — relay state + WiFi status every minute
+    - pattern: "tele/+/STATE"
+      extract:
+        device_id: "$1"
+    # Schema platform-nativă post-bridge
+    - pattern: "tenants/+/devices/+/up/sensor"
+      extract:
+        tenant_id: "$1"
+        device_id: "$2"
+    - pattern: "tenants/+/devices/+/up/state"
+      extract:
+        tenant_id: "$1"
+        device_id: "$2"
+
+parser:
+  type: json
+  # JSON parser plat (nu nested array). Field-urile vor fi extrase direct
+  # din top-level + sub-objects (ENERGY.Power → power, etc.) via Faza 4 logic.
+
+capabilities:
+  - relay
+  - power_meter
+  - smart_plug
+
+# Maparea Tasmota nested ENERGY.* → field-uri canonice flat.
+# Faza 4 parser engine va aplica path-uri JSON pentru extract.
+normalized_fields:
+  active_power_w:
+    source: ENERGY.Power
+    unit: W
+    decimals: 0
+  voltage_v:
+    source: ENERGY.Voltage
+    unit: V
+    decimals: 1
+  current_a:
+    source: ENERGY.Current
+    unit: A
+    decimals: 3
+  total_energy_kwh:
+    source: ENERGY.Total
+    unit: kWh
+    decimals: 3
+  today_kwh:
+    source: ENERGY.Today
+    unit: kWh
+    decimals: 3
+  yesterday_kwh:
+    source: ENERGY.Yesterday
+    unit: kWh
+    decimals: 3
+  power_factor:
+    source: ENERGY.Factor
+    unit: ""
+    decimals: 2
+  apparent_power_va:
+    source: ENERGY.ApparentPower
+    unit: VA
+    decimals: 0
+  reactive_power_var:
+    source: ENERGY.ReactivePower
+    unit: var
+    decimals: 0
+  relay_state_str:
+    source: POWER  # "ON" / "OFF"
+    unit: ""
+  wifi_rssi_dbm:
+    source: Wifi.RSSI  # 0-100 scale Tasmota; convert in Faza 4 if needed
+    unit: dBm
+
+commands:
+  relay_on:
+    topic: "cmnd/{device_id}/POWER"
+    payload: "ON"
+    timeout_s: 5
+    confirms_with_field: relay_state_str
+    confirms_with_value: "ON"
+  relay_off:
+    topic: "cmnd/{device_id}/POWER"
+    payload: "OFF"
+    timeout_s: 5
+    confirms_with_field: relay_state_str
+    confirms_with_value: "OFF"
+  relay_toggle:
+    topic: "cmnd/{device_id}/POWER"
+    payload: "TOGGLE"
+    timeout_s: 5
+  request_state:
+    topic: "cmnd/{device_id}/State"
+    payload: ""
+    timeout_s: 3
+  request_energy_status:
+    topic: "cmnd/{device_id}/Status"
+    payload: "8"
+    timeout_s: 3
+
+telemetry_streams:
+  sensor:
+    interval_hint: 5m   # default Tasmota TelePeriod
+    offline_after: 15m
+  state:
+    interval_hint: 1m
+    offline_after: 5m
