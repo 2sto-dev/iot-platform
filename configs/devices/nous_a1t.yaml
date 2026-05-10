@@ -14,18 +14,22 @@ identification:
   topic_match:
     # Tasmota tele/<topic>/SENSOR — energy data every TelePeriod
     - pattern: "tele/+/SENSOR"
+      stream: "sensor"
       extract:
         device_id: "$1"
     # Tasmota tele/<topic>/STATE — relay state + WiFi status every minute
     - pattern: "tele/+/STATE"
+      stream: "state"
       extract:
         device_id: "$1"
     # Schema platform-nativă post-bridge
     - pattern: "tenants/+/devices/+/up/sensor"
+      stream: "sensor"
       extract:
         tenant_id: "$1"
         device_id: "$2"
     - pattern: "tenants/+/devices/+/up/state"
+      stream: "state"
       extract:
         tenant_id: "$1"
         device_id: "$2"

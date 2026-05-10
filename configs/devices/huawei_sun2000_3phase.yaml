@@ -30,10 +30,28 @@ identification:
   topic_match:
     # Format vendor original (cu leading slash). Capturăm serial-ul la grup 1.
     - pattern: "~^/(?P<device_id>\\d+)/[^/]+/[^/]+/telemetry$"
+      stream: "telemetry"
       extract:
         device_id: "device_id"
     # Schema platform-nativă (post-bridge translation).
     - pattern: "tenants/+/devices/+/up/telemetry"
+      stream: "telemetry"
+      extract:
+        tenant_id: "$1"
+        device_id: "$2"
+    # Shadow + cmd_ack streams (Faza 3.4 + 3.3).
+    - pattern: "tenants/+/devices/+/up/shadow"
+      stream: "shadow"
+      extract:
+        tenant_id: "$1"
+        device_id: "$2"
+    - pattern: "tenants/+/devices/+/up/cmd_ack"
+      stream: "cmd_ack"
+      extract:
+        tenant_id: "$1"
+        device_id: "$2"
+    - pattern: "tenants/+/devices/+/up/ota"
+      stream: "ota"
       extract:
         tenant_id: "$1"
         device_id: "$2"

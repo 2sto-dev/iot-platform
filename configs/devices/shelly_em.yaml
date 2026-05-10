@@ -13,31 +13,38 @@ protocol: mqtt
 identification:
   topic_match:
     # Shelly publishes leaf-per-field on /emeter/0/<field> (gen1 firmware).
-    # Patterns capture serial = part 2, field = part 4.
     - pattern: "shellies/+/emeter/0/power"
+      stream: "emeter"
       extract:
         device_id: "$1"
     - pattern: "shellies/+/emeter/0/voltage"
+      stream: "emeter"
       extract:
         device_id: "$1"
     - pattern: "shellies/+/emeter/0/current"
+      stream: "emeter"
       extract:
         device_id: "$1"
     - pattern: "shellies/+/emeter/0/total"
+      stream: "emeter"
       extract:
         device_id: "$1"
     - pattern: "shellies/+/emeter/0/total_returned"
+      stream: "emeter"
       extract:
         device_id: "$1"
     - pattern: "shellies/+/relay/0"
+      stream: "relay"
       extract:
         device_id: "$1"
     # Schema platform-nativă post-bridge
     - pattern: "tenants/+/devices/+/up/emeter"
+      stream: "emeter"
       extract:
         tenant_id: "$1"
         device_id: "$2"
     - pattern: "tenants/+/devices/+/up/relay"
+      stream: "relay"
       extract:
         tenant_id: "$1"
         device_id: "$2"
