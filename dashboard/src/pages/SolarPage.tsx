@@ -399,21 +399,27 @@ function TemperatureCard({
   // Pct on a 0-80°C visual scale (clamped) — pentru bara de jos
   const pct = value === null ? 0 : Math.max(0, Math.min(1, value / 80));
   const t = ROW_TONES[tone];
+  const isHot = tone === "rose";
+
+  // Cardul palpaie cu bg rose cand temperatura e in zona Hot — atentionare vizuala.
+  const cardClass = isHot
+    ? "pulse-warn rounded-xl border p-4"
+    : "bg-white border border-gray-200 rounded-xl p-4";
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4">
+    <div className={cardClass}>
       <div className="flex items-center gap-3">
         <IconBubble tone={tone}>{icon}</IconBubble>
         <div className="flex-1 min-w-0">
-          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">{label}</p>
+          <p className={`text-[11px] font-semibold uppercase tracking-wider ${isHot ? "text-rose-700" : "text-gray-500"}`}>{label}</p>
           <p className="flex items-baseline gap-1 mt-0.5">
-            <span className={`text-xl font-bold tabular-nums ${value === null ? "text-gray-300" : "text-gray-900"}`}>
+            <span className={`text-xl font-bold tabular-nums ${value === null ? "text-gray-300" : isHot ? "text-rose-900" : "text-gray-900"}`}>
               {value !== null ? value.toFixed(1) : "—"}
             </span>
-            <span className="text-xs font-medium text-gray-500">°C</span>
+            <span className={`text-xs font-medium ${isHot ? "text-rose-600" : "text-gray-500"}`}>°C</span>
           </p>
         </div>
-        <span className={`text-[10px] font-medium ${t.text}`}>{status}</span>
+        <span className={`text-[10px] font-bold ${isHot ? "text-rose-700 animate-pulse" : t.text}`}>{status}</span>
       </div>
       {value !== null && (
         <div className="mt-3 h-1 bg-gray-100 rounded-full overflow-hidden">

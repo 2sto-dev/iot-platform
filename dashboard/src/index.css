@@ -1,1 +1,20 @@
 @import "tailwindcss";
+
+/* Warning pulse pentru carduri critice (ex: temperatura inverter / baterie peste threshold).
+   Background palpaie de la rose-50 la rose-200 + halo subtil rose, ca atentionare vizuala. */
+@keyframes pulse-warn {
+  0%, 100% {
+    background-color: rgb(255 241 242); /* rose-50 */
+    border-color: rgb(254 205 211);     /* rose-200 */
+    box-shadow: 0 0 0 0 rgb(225 29 72 / 0.35);
+  }
+  50% {
+    background-color: rgb(254 205 211); /* rose-200 */
+    border-color: rgb(251 113 133);     /* rose-400 */
+    box-shadow: 0 0 0 6px rgb(225 29 72 / 0);
+  }
+}
+
+.pulse-warn {
+  animation: pulse-warn 1.6s ease-in-out infinite;
+}
