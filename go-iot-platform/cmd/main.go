@@ -478,18 +478,21 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 		if err != nil {
 			t = time.Now()
 		}
+		// Folosim prefix `nousat_` pentru toate field-urile ca sa eviti type conflicts
+		// pe scopul global al measurement="devices" (alte device-uri pot avea field
+		// cu acelasi nume dar tip diferit — ex: `power` a fost cuplat cu string ON/OFF).
 		p := influxdb2.NewPoint("devices",
 			map[string]string{"device": deviceID, "source": "nousat", "type": "energy", "tenant_id": tenantTag},
 			map[string]interface{}{
-				"power":          sensor.ENERGY.Power,
-				"apparent_power": sensor.ENERGY.ApparentPower,
-				"reactive_power": sensor.ENERGY.ReactivePower,
-				"power_factor":   sensor.ENERGY.Factor,
-				"voltage":        sensor.ENERGY.Voltage,
-				"current":        sensor.ENERGY.Current,
-				"total":          sensor.ENERGY.Total,
-				"today":          sensor.ENERGY.Today,
-				"yesterday":      sensor.ENERGY.Yesterday,
+				"nousat_power":          sensor.ENERGY.Power,
+				"nousat_apparent_power": sensor.ENERGY.ApparentPower,
+				"nousat_reactive_power": sensor.ENERGY.ReactivePower,
+				"nousat_power_factor":   sensor.ENERGY.Factor,
+				"nousat_voltage":        sensor.ENERGY.Voltage,
+				"nousat_current":        sensor.ENERGY.Current,
+				"nousat_total":          sensor.ENERGY.Total,
+				"nousat_today":          sensor.ENERGY.Today,
+				"nousat_yesterday":      sensor.ENERGY.Yesterday,
 			},
 			t)
 		writePoint(p, pool, tenantPlan, logging.Fields{

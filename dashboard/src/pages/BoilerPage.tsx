@@ -11,9 +11,15 @@ interface Device {
   device_type: string;
 }
 
-// `relay_state` e string ON/OFF de la STATE topic — useDeviceMetrics îl ignora
-// (returneaza number|null), deci e OK sa nu-l listam. ON/OFF derivam din `power > 1W`.
-const FIELDS = ["power", "voltage", "current", "total", "today", "yesterday", "power_factor", "rssi"];
+// Field-urile Tasmota au prefix `nousat_` ca sa evite type-conflict cu alte
+// device-uri din aceeasi masuratoare 'devices' (ex: `power` a fost cuplat cu
+// string ON/OFF pe alta cale). RSSI vine din STATE handler, fara prefix.
+const FIELDS = [
+  "nousat_power", "nousat_voltage", "nousat_current",
+  "nousat_total", "nousat_today", "nousat_yesterday",
+  "nousat_power_factor",
+  "rssi",
+];
 
 export default function BoilerPage() {
   const [selectedSerial, setSelectedSerial] = useState<string | null>(null);
@@ -34,14 +40,14 @@ export default function BoilerPage() {
   const activeDevice = nousat.find((d) => d.serial_number === activeSerial);
 
   const { values: m } = useDeviceMetrics(activeSerial, FIELDS, range);
-  const power = m["power"];          // W
-  const voltage = m["voltage"];      // V
-  const current = m["current"];      // A
-  const total = m["total"];          // kWh lifetime
-  const today = m["today"];          // kWh azi (resetează la 00:00)
-  const yesterday = m["yesterday"];  // kWh ieri
-  const powerFactor = m["power_factor"];
-  const rssi = m["rssi"];            // dBm (de la Tasmota STATE)
+  const power = m["nousat_power"];          // W
+  const voltage = m["nousat_voltage"];      // V
+  const current = m["nousat_current"];      // A
+  const total = m["nousat_total"];          // kWh lifetime
+  const today = m["nousat_today"];          // kWh azi (resetează la 00:00)
+  const yesterday = m["nousat_yesterday"];  // kWh ieri
+  const powerFactor = m["nousat_power_factor"];
+  const rssi = m["rssi"];                   // dBm (de la Tasmota STATE)
 
   const isOn = power !== null && power > 1; // > 1W = consumă
 
