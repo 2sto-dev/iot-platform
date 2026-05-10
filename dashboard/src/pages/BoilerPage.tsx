@@ -75,13 +75,17 @@ export default function BoilerPage() {
       setPending({ desired, t0 });
 
       // Polling explicit pe `relay_on` (1/0) — Tasmota publica STATE imediat dupa
-      // Backlog command, asa ca in 1-3s ar trebui sa avem valoarea actualizata.
+      // POWER command + State request, asa ca in 1-3s ar trebui sa avem valoarea.
+      let pollCount = 0;
       pollRef.current = setInterval(async () => {
+        pollCount++;
         try {
           const r = await goApi.get(`/metrics/${activeSerial}/relay_on`, {
             params: { range: "-30s" },
           });
           const val = r.data?.value;
+          // eslint-disable-next-line no-console
+          console.log(`[boiler poll #${pollCount}] expected=${expected} val=${val} (type=${typeof val})`);
           if (typeof val === "number" && val === expected) {
             clearPoll();
             setPending(null);
@@ -89,17 +93,18 @@ export default function BoilerPage() {
             setTimeout(() => setFeedback(null), 4000);
             return;
           }
-        } catch {
-          // 'no data' poate aparea daca STATE nu a ajuns inca; continuam polling
+        } catch (err: any) {
+          // eslint-disable-next-line no-console
+          console.log(`[boiler poll #${pollCount}] error:`, err?.response?.status, err?.message);
         }
 
-        // Timeout 12s (Tasmota uneori intarzie pana la 3-5s)
-        if (Date.now() - t0 > 12_000) {
+        // Timeout 15s (mai indulgent pentru retele lente)
+        if (Date.now() - t0 > 15_000) {
           clearPoll();
           setPending(null);
           setFeedback({
             kind: "timeout",
-            msg: "Comanda trimisă dar fără confirmare în 12s — verifică manual",
+            msg: "Comanda trimisă dar fără confirmare în 15s — verifică manual",
           });
           setTimeout(() => setFeedback(null), 6000);
         }

@@ -167,21 +167,31 @@ class DeviceViewSet(viewsets.ModelViewSet):
             )
 
         from .mqtt_publisher import publish_raw
-        topic = f"cmnd/{device.serial_number}/Backlog"
-        payload = f"POWER {state}; STATE; SENSOR"
+        import time as _time
 
-        ok = publish_raw(topic, payload)
-        if not ok:
+        # 1. Trimite comanda POWER (Tasmota va schimba releul)
+        cmd_topic = f"cmnd/{device.serial_number}/POWER"
+        ok1 = publish_raw(cmd_topic, state)
+        if not ok1:
             return Response(
-                {"detail": "MQTT publish failed (broker unreachable or not configured)"},
+                {"detail": "MQTT publish POWER failed (broker unreachable)"},
                 status=503,
             )
+
+        # 2. Forteaza Tasmota sa publice STATE imediat (nu astepta TelePeriod)
+        #    Folosim 2 cereri separate pentru robustete (Backlog avea timing issues
+        #    la unele firmware-uri Tasmota). Mic delay sa lasam comanda POWER aplicata.
+        _time.sleep(0.15)
+        publish_raw(f"cmnd/{device.serial_number}/State", "")
+
+        # 3. Forteaza si SENSOR fresh (energy values)
+        publish_raw(f"cmnd/{device.serial_number}/Status", "8")
 
         from django.utils import timezone
         return Response({
             "device": device.serial_number,
-            "command": payload,
-            "topic": topic,
+            "state": state,
+            "topics": [cmd_topic, f"cmnd/{device.serial_number}/State"],
             "issued_at": timezone.now().isoformat(),
         }, status=202)
 
