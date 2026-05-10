@@ -124,8 +124,9 @@ Această roadmap transformă platforma în:
 | **ruff** sau **flake8 + black** | latest | Python linting | ❌ **De adăugat** |
 | **mypy** | 1.7+ | Type checking Python | ⚠️ Opțional |
 | **pre-commit** hooks | 3.5+ | Quality gate pre-commit | ❌ **De adăugat** |
-| **Docker** + **docker-compose** | 24.x | Local dev environment | ⚠️ Necesar Faza 9 |
-| **Helm / Kubernetes** | 1.28+ | Production orchestration (când scale > 10K devices) | ❌ **De adăugat la Faza 10** |
+| **systemd** | unit files | Process management bare-metal (Linux) | ✅ Stock pe Ubuntu/Debian |
+| **Ansible** | 2.16+ | Orchestrare deploy multi-VM (push-based, agentless) | ❌ **De adăugat înainte de Faza 9** |
+| **nginx** | 1.24+ | Reverse proxy + static asset serving (alternativă la Kong static) | ⚠️ Opțional dacă rămâne Kong |
 
 ### E. Tooling — Observability (Faza 1+ obligatoriu)
 
@@ -146,7 +147,7 @@ Această roadmap transformă platforma în:
 | **Pipeline gates** | golangci-lint + go test + pytest + tsc + npm audit + trivy scan | ⚠️ Parțial |
 | **Deployment automation** | Terraform / Ansible / Pulumi | ❌ **De adăugat** |
 | **Secret manager** | Vault / AWS Secrets Manager / Doppler | ❌ **De adăugat** (acum sunt în .env) |
-| **Container registry** | GHCR / Docker Hub / ECR | ❌ **De adăugat** când deploy via Docker |
+| **Artifact storage** | S3/B2/MinIO bucket cu binary tarballs versionate | ❌ **De adăugat** (bare-metal deploy: `iot-go-platform-vX.Y.Z.tar.gz`) |
 
 ### G. Backup & Disaster Recovery
 
@@ -778,9 +779,9 @@ Cu 2 FTE paralel (split: backend + SRE/security) → **12–14 săpt.**
 | **Logs** | Loki sau ELK | Runtime | Faza 1 |
 | **Errors** | Sentry | Runtime | Faza 5 |
 | **Feature flags** | GrowthBook self-hosted | All phases | Faza 2 |
-| **CI/CD** | GitHub Actions + ArgoCD (k8s) | Deploy | Faza 1 |
-| **Secrets** | Vault sau AWS Secrets Manager | Runtime | Faza 9 |
-| **Container reg** | GHCR | Build artifacts | Faza 9 |
+| **CI/CD** | GitHub Actions (build) + Ansible playbooks (deploy bare-metal) | Deploy | Faza 1 |
+| **Secrets** | Vault self-hosted sau systemd `LoadCredential=` + sops + age | Runtime | Faza 9 |
+| **Artifact storage** | S3/B2 bucket cu tarballs Go binar + Django wheels | Build artifacts | Faza 9 |
 
 ---
 
@@ -1094,42 +1095,190 @@ Pentru un tenant cu 10 devices = ~$9/lună COGS. Tarif clientului recomandat: $2
 
 ---
 
-## AI Agent Development Conditions
+## Autonomous AI Agent Operating Model
 
-> **Toate regulile din versiunea 1 sunt menținute** + adăugiri pentru enterprise.
+> **Filozofie:** AI Agent operează ca **inginer autonom** la nivelul **L3 (Phase Autonomy)** —
+> execută integral o fază end-to-end, oprindu-se DOAR la **phase boundary** pentru sign-off uman.
+> Targetul progresiv e **L4 (Continuous Autonomy)** — execuție multi-fază cu review uman lunar.
 
-### Reguli adiționale (v2)
+### Niveluri de autonomie (analog SAE driving levels)
+
+| Nivel | Denumire | Cine decide | Cine execută | Human gate |
+|---|---|---|---|---|
+| **L1** | Assist | Human | Human, AI sugerează | Per change |
+| **L2** | Co-pilot | AI propune, human aprobă | AI scrie, human merge | Per PR |
+| **L3** | Phase Autonomy ⭐ | AI decide tactic, human strategic | AI complet | Per fază |
+| **L4** | Continuous Autonomy | AI decide tactic + strategic minor | AI complet | Lunar review |
+| **L5** | Full Autonomy | AI complet | AI | Doar incidente |
+
+**Setting target:** începe la **L2** (Faza 2), promovare la **L3** după prima fază livrată complet, evaluare L4 după Faza 5.
+
+### AI Agent — capabilități self-service
+
+AI Agent are acces **direct** (fără aprobare per acțiune) la:
+
+| Acțiune | Tool | Limită |
+|---|---|---|
+| Read code, configs, logs | filesystem + git | întreg repo |
+| Edit code, configs, docs | Edit/Write tools | branch dedicat `agent/<phase>` |
+| Run tests | `go test`, `pytest`, `npm test` | unlimited |
+| Run linters | golangci-lint, ruff, yamllint | unlimited |
+| Run benchmarks | `go test -bench` | înainte de PR |
+| Run migrations local | `manage.py migrate`, custom scripts | DB local + staging |
+| Query Influx (read) | `influx query` | toate bucket-urile |
+| Query MySQL (read) | `SELECT` | toate tabelele |
+| Publish MQTT (test topics) | mosquitto_pub | doar topice `test/...` |
+| Restart services local | `systemctl --user` | doar dev VM |
+| Create Git commits | `git commit` (no-skip-verify) | branch agent |
+| Push to feature branch | `git push origin agent/...` | NU `main` direct |
+| Open PR | `gh pr create` | review auto-assigned |
+| Merge PR (cu toate gate-urile verzi) | `gh pr merge --auto --squash` | doar feature → develop |
+| Apply Ansible playbook (staging) | `ansible-playbook -i staging` | doar staging |
+| Read Prometheus / Grafana | API queries | observabilitate |
+| Read Sentry events | API | error analysis |
+
+### AI Agent — acțiuni INTERZISE (mereu human gate)
+
+| Acțiune | De ce |
+|---|---|
+| Push direct pe `main` | Branch protection enforce |
+| Apply Ansible production | Production deploy = human go/no-go |
+| `DROP DATABASE`, `DELETE FROM` în prod | Distructiv |
+| Modificare firewall / network ACL | Risc de auto-lockout |
+| Rotire JWT secrets / MQTT passwords prod | Outage potential |
+| Modify Tenant.plan în producție | Billing / SLA impact |
+| Acceptă modificări la `docs/upgrade_md_*.md` (acest fișier) fără human review | Roadmap = source of truth |
+| Modificări la GitHub branch protection / CODEOWNERS | Self-bypass risc |
+| Schimbare retention InfluxDB sub valoarea curentă | Data loss risc |
+| Hard-delete tenant (right-to-erasure) | Compliance — necesită ticket + dual approval |
+
+### Loop autonom — workflow standard pentru o fază
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 1. AI verifică prerequisites pentru fază (§Prerequisites)     │
+│    ❌ → escaladare cu listă explicită ce lipsește            │
+│    ✅ → continuă                                              │
+└────────────────────────┬─────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 2. AI generează ADR draft + plan implementare                 │
+│    Salvează în docs/adr/NNNN-<title>.md (status=Proposed)    │
+└────────────────────────┬─────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 3. AI checkout `agent/faza-N-<topic>` branch                  │
+│    git checkout -b agent/faza-2-yaml-loader                   │
+└────────────────────────┬─────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 4. AI implementează în iterații mici                          │
+│    Fiecare iterație: Edit → Test → Bench → Commit             │
+│    Self-correcting: dacă test fail → debug → fix → retest    │
+└────────────────────────┬─────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 5. AI rulează quality gates (§Quality Gates per Phase)        │
+│    Toate ✅ → continuă; oricare ❌ → fix și retry             │
+└────────────────────────┬─────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 6. AI deploy la staging via Ansible playbook                  │
+│    Smoke test 15 min                                          │
+│    Compară metrics (Prometheus) cu baseline                   │
+│    Regression > 10% → rollback automat + log                  │
+└────────────────────────┬─────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 7. AI generează summary report                                │
+│    docs/phase-reports/faza-N-summary.md                       │
+│    Diff metrics, test results, deployments, risks            │
+└────────────────────────┬─────────────────────────────────────┘
+                         ↓
+┌─────────────────────────────────────────────────────────────┐
+│ 8. AI deschide PR `agent/...` → `develop`                     │
+│    Self-approval prin gates verzi + review automated          │
+│    HUMAN GATE: phase boundary review                          │
+│    - approve → AI merge → deploy prod (canary)                │
+│    - reject → AI itereeaza pe feedback                        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Self-healing & error recovery
+
+AI Agent gestionează autonom:
+
+| Scenariu | Acțiune AI |
+|---|---|
+| Test eșuează | Citește output, izolează cauza, fixează, retesteaza (max 5 iterații) |
+| Bench regression < 20% | Profile, identifică bottleneck, optimizează, re-bench |
+| Bench regression ≥ 20% | Stop, generează raport, escaladare la human |
+| Lint warning | Auto-fix dacă posibil (`golangci-lint --fix`), altfel modifică manual |
+| Migration eșuează pe staging | Rollback automat, debug, regenerează migration |
+| Deploy staging fail | Rollback, citește logs, fix, retry max 2 ori |
+| Smoke test fail post-deploy | Rollback, escaladare imediată |
+| Prerequisite ❌ apare la nivel de fază | Stop, listează gap-urile, propune plan, așteaptă human |
+
+### Decision authority matrix (L3 autonomy)
+
+| Decizie | AI poate? | Notă |
+|---|---|---|
+| Alege design pattern (factory vs strategy) | ✅ | Documentează în ADR |
+| Alege tool (yamllint vs cue) | ✅ | Justifică în ADR cu trade-offs |
+| Adaugă dependency Go/Python/npm | ✅ | dacă < 10MB + license OSI; altfel escaladare |
+| Refactor componentă internă | ✅ | dacă API public neschimbat |
+| Schimbă API public (breaking) | ❌ | Necesită human + ADR aprobat |
+| Adaugă rută API nouă | ✅ | OpenAPI doc actualizat |
+| Modifică rate limit valori | ❌ | Impact pe customers |
+| Modifică retention Influx | ❌ | Data loss / cost impact |
+| Adaugă metric Prometheus | ✅ | Just do it |
+| Adaugă alert PagerDuty | ⚠️ | Notify SRE prin Slack, nu enable direct |
+| Schimbă bcrypt cost | ❌ | Performance impact + compliance |
+| Tune timeout valori | ✅ | dacă < 2x baseline |
+
+### Reguli reziduale (din v1, păstrate)
 
 #### 24. Phase prerequisites verification mandatory
-
-AI Agent **NU începe** o fază înainte ca prerequisites pentru ea să fie ✅ în acest document.
+AI Agent verifică checklist `§Prerequisites Verification` înainte de Faza N. Lipsuri → STOP + escaladare.
 
 #### 25. ADR mandatory pentru schimbări arhitecturale
-
-Orice fază care introduce concept nou (matcher, parser, runtime, etc.) **necesită ADR** în `docs/adr/`. AI Agent generează draft, human aprobă.
+Toate fazele 2–9 generează ADR draft (`docs/adr/NNNN-*.md`). Status `Proposed` la deschidere PR, `Accepted` post-merge.
 
 #### 26. Performance regression check
+La PR Faza 3+: `go test -bench`. Regression > 10% = STOP, > 20% = escaladare.
 
-La fiecare PR pe Faza 3+: rulează `go test -bench`. Dacă regression > 10%, **REJECT** PR și investighează.
-
-#### 27. Security review per PR
-
-PR-urile pe Faza 5+ (capability, command, rule, tenant) **necesită review de Security Engineer** (nu doar dev review).
+#### 27. Security review per PR (Faza 5+)
+Security tag pe PR → notify Security Engineer Slack. AI așteaptă review în loc să auto-merge dacă PR e marcat `security-review-required`.
 
 #### 28. Migration script obligatoriu pentru schema changes
-
-Orice migration MySQL sau Influx schema change **necesită**:
-- Up + down migration
-- Test pe staging cu producția shadow
-- Rollback plan documentat
+Up + down migration, test pe staging shadow, rollback plan în PR description.
 
 #### 29. Compliance impact analysis per phase
+AI generează `docs/compliance-impact/faza-N.md` cu impact GDPR/SOC2 (None/Low/Med/High + reasoning).
 
-La planning fază: AI Agent identifică impacturi GDPR/SOC2 și le include în ADR.
+#### 30. Capacity test pre-release (Faza 4, 7, 9)
+Pre-merge: `k6 run loadtest.js --vus 1000 --duration 5m` pe staging. Documentează în PR.
 
-#### 30. Capacity test pre-release
+#### 31. Self-monitoring during phase execution
+AI verifică periodic (la fiecare 30 min în mod autonom):
+- Prometheus alerts firing? → escaladare
+- Memory/CPU usage normal? → ajustare resources sau escaladare
+- Error rate > baseline? → pause work, investigate
 
-Înainte de major release (post-Faza 4, 7, 9): rulează **k6 load test** la 1.5x throughput target. Documentează rezultatele.
+#### 32. Audit trail complet
+Toate acțiunile AI (commits, deploys, decisions) se loghează cu trace_id în:
+- Git commit metadata (Co-Authored-By: <agent>)
+- AuditLog Django (action="ai_agent.<verb>")
+- Slack channel `#agent-activity` (real-time)
+
+#### 33. Escalation criteria explicite
+AI escaladează la human (Slack mention + email) când:
+- Phase prerequisites incomplete
+- 3+ iterații consecutive eșuate pe aceeași sub-task
+- Production impact detected post-deploy
+- Compliance impact assessed > Medium
+- Timeline depășește estimarea cu > 50%
+- Decizie din `§Decision authority matrix` cu ❌ apare necesară
 
 ---
 
