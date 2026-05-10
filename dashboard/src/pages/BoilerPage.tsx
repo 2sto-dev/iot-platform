@@ -71,36 +71,35 @@ export default function BoilerPage() {
     try {
       await api.post(`/devices/${activeDevice.id}/relay/`, { state: desired });
       const t0 = Date.now();
+      const expected = desired === "ON" ? 1 : 0;
       setPending({ desired, t0 });
 
-      // Poll relay_state din Influx la 800ms, max 10s
+      // Polling explicit pe `relay_on` (1/0) — Tasmota publica STATE imediat dupa
+      // Backlog command, asa ca in 1-3s ar trebui sa avem valoarea actualizata.
       pollRef.current = setInterval(async () => {
         try {
-          const r = await goApi.get(`/metrics/${activeSerial}/relay_state`, {
+          const r = await goApi.get(`/metrics/${activeSerial}/relay_on`, {
             params: { range: "-30s" },
           });
           const val = r.data?.value;
-          // relay_state e string in Influx → metrics endpoint returneaza number|null;
-          // pentru string Influx returneaza 0 sau 1 sau valoarea ca text esuata.
-          // Ne bazam pe `nousat_power` schimbat dupa command in loc.
-          if (typeof val === "number") {
-            // Daca returneaza ceva, presupunem confirmare.
+          if (typeof val === "number" && val === expected) {
             clearPoll();
             setPending(null);
-            setFeedback({ kind: "ok", msg: `Comandă executată (${desired})` });
+            setFeedback({ kind: "ok", msg: `Confirmat: relay = ${desired}` });
             setTimeout(() => setFeedback(null), 4000);
+            return;
           }
         } catch {
-          // Ignorat — continuăm polling
+          // 'no data' poate aparea daca STATE nu a ajuns inca; continuam polling
         }
 
-        // Timeout 10s
-        if (Date.now() - t0 > 10_000) {
+        // Timeout 12s (Tasmota uneori intarzie pana la 3-5s)
+        if (Date.now() - t0 > 12_000) {
           clearPoll();
           setPending(null);
           setFeedback({
             kind: "timeout",
-            msg: "Comanda trimisă dar fără confirmare în 10s — verifică manual",
+            msg: "Comanda trimisă dar fără confirmare în 12s — verifică manual",
           });
           setTimeout(() => setFeedback(null), 6000);
         }
@@ -111,21 +110,6 @@ export default function BoilerPage() {
       setTimeout(() => setFeedback(null), 6000);
     }
   }
-
-  // Confirmare alternativă: dacă power se schimbă "natural" după command (e.g. ON → 1500W,
-  // sau OFF → 0W), considerăm confirmat.
-  useEffect(() => {
-    if (!pending || power === null) return;
-    const matchesDesired =
-      (pending.desired === "ON" && power > 1) ||
-      (pending.desired === "OFF" && power < 0.5);
-    if (matchesDesired) {
-      clearPoll();
-      setPending(null);
-      setFeedback({ kind: "ok", msg: `Confirmat: ${pending.desired}` });
-      setTimeout(() => setFeedback(null), 4000);
-    }
-  }, [power, pending]);
 
   useEffect(() => () => clearPoll(), []);
 
