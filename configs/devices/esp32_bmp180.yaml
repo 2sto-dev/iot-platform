@@ -1,0 +1,40 @@
+schema_version: "1.0"
+id: esp32_bmp180
+name: "ESP32 BMP180"
+vendor: espressif
+model: ESP32+BMP180
+description: "ESP32 cu senzor barometric BMP180 (presiune + temperatură, low-cost)"
+
+protocol: mqtt
+
+identification:
+  topic_match:
+    - pattern: "tenants/+/devices/+/up/bmp180"
+      stream: "bmp180"
+      extract:
+        tenant_id: "$1"
+        device_id: "$2"
+
+parser:
+  type: json
+
+capabilities:
+  - pressure_sensor
+  - temperature_sensor
+  - mains_powered
+  - wifi
+
+normalized_fields:
+  pressure_hpa:
+    source: pressure
+    unit: hPa
+    decimals: 2
+  temperature_c:
+    source: temp
+    unit: C
+    decimals: 1
+
+telemetry_streams:
+  bmp180:
+    interval_hint: 30s
+    offline_after: 3min

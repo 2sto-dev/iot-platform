@@ -1,0 +1,45 @@
+schema_version: "1.0"
+id: esp32_bme280
+name: "ESP32 BME280"
+vendor: espressif
+model: ESP32+BME280
+description: "ESP32 cu senzor BME280 (presiune + temperatură + umiditate)"
+
+protocol: mqtt
+
+identification:
+  topic_match:
+    - pattern: "tenants/+/devices/+/up/bme280"
+      stream: "bme280"
+      extract:
+        tenant_id: "$1"
+        device_id: "$2"
+
+parser:
+  type: json
+
+capabilities:
+  - pressure_sensor
+  - temperature_sensor
+  - humidity_sensor
+  - mains_powered
+  - wifi
+
+normalized_fields:
+  pressure_hpa:
+    source: pressure
+    unit: hPa
+    decimals: 2
+  temperature_c:
+    source: temp
+    unit: C
+    decimals: 2
+  humidity_pct:
+    source: hum
+    unit: "%"
+    decimals: 1
+
+telemetry_streams:
+  bme280:
+    interval_hint: 30s
+    offline_after: 3min

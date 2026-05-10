@@ -28,6 +28,10 @@ const DEVICE_TYPES = [
   { value: "zigbee_sensor", label: "Zigbee Sensor" },
   { value: "auto_detected", label: "Auto Detected" },
   { value: "sun2000", label: "Huawei SUN2000" },
+  { value: "esp32_bmp180", label: "ESP32 BMP180" },
+  { value: "esp32_bmp280", label: "ESP32 BMP280" },
+  { value: "esp32_bme280", label: "ESP32 BME280" },
+  { value: "esp32_ms5611", label: "ESP32 MS5611" },
 ];
 
 interface FormState {

@@ -1,0 +1,40 @@
+schema_version: "1.0"
+id: esp32_ms5611
+name: "ESP32 MS5611"
+vendor: espressif
+model: ESP32+MS5611
+description: "ESP32 cu senzor MS5611 (presiune înaltă precizie ±0.012 hPa, altimetru)"
+
+protocol: mqtt
+
+identification:
+  topic_match:
+    - pattern: "tenants/+/devices/+/up/ms5611"
+      stream: "ms5611"
+      extract:
+        tenant_id: "$1"
+        device_id: "$2"
+
+parser:
+  type: json
+
+capabilities:
+  - pressure_sensor
+  - temperature_sensor
+  - mains_powered
+  - wifi
+
+normalized_fields:
+  pressure_hpa:
+    source: pressure
+    unit: hPa
+    decimals: 3
+  temperature_c:
+    source: temp
+    unit: C
+    decimals: 2
+
+telemetry_streams:
+  ms5611:
+    interval_hint: 30s
+    offline_after: 3min

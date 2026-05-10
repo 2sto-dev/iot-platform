@@ -19,6 +19,10 @@ class Device(models.Model):
         ("zigbee_sensor", "Zigbee Sensor"),
         ("auto_detected", "Auto Detected"),
         ("sun2000", "Huawei SUN2000"),
+        ("esp32_bmp180", "ESP32 BMP180"),
+        ("esp32_bmp280", "ESP32 BMP280"),
+        ("esp32_bme280", "ESP32 BME280"),
+        ("esp32_ms5611", "ESP32 MS5611"),
     ]
 
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name="devices")
