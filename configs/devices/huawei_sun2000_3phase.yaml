@@ -1,0 +1,97 @@
+# Huawei SUN2000 3-phase Hybrid Inverter (with battery LUNA2000).
+#
+# Vendor topic format (legacy / direct from inverter):
+#   /<inverter_sn>/<collector_sn>/<dongle_sn>/telemetry
+#
+# Bridge translates to platform-native schema:
+#   tenants/<tid>/devices/<inverter_sn>/up/telemetry
+#
+# Payload structure:
+#   {
+#     "ts": "2026-05-10T12:34:56Z",
+#     "measurements": [
+#       {"key": "pv_input_power", "value": 8.66},
+#       {"key": "battery_soc", "value": 99},
+#       ...
+#     ],
+#     "house_load_kw_est": 0.51   // computed by inverter / collector
+#   }
+
+schema_version: "1.0"
+id: huawei_sun2000_3phase
+name: "Huawei SUN2000 3-phase Hybrid"
+vendor: huawei
+model: SUN2000
+description: "Hybrid solar inverter with optional LUNA2000 battery storage. 3-phase grid-tied."
+
+protocol: mqtt
+
+identification:
+  topic_match:
+    # Format vendor original (cu leading slash). Capturăm serial-ul la grup 1.
+    - pattern: "~^/(?P<device_id>\\d+)/[^/]+/[^/]+/telemetry$"
+      extract:
+        device_id: "device_id"
+    # Schema platform-nativă (post-bridge translation).
+    - pattern: "tenants/+/devices/+/up/telemetry"
+      extract:
+        tenant_id: "$1"
+        device_id: "$2"
+
+parser:
+  type: json_with_measurements_array
+  payload_path: measurements
+  measurement_key_field: key
+  measurement_value_field: value
+
+capabilities:
+  - inverter
+  - battery
+  - power_meter
+  - solar_pv
+
+# Mapare vendor field → canonical name (Faza 4 normalize layer).
+# La query, frontend cere `solar_power_kw`, primește valoarea de la `pv_input_power`.
+normalized_fields:
+  solar_power_kw:
+    source: pv_input_power
+    unit: kW
+    decimals: 3
+  battery_soc_pct:
+    source: battery_soc
+    unit: "%"
+    decimals: 0
+  battery_power_kw:
+    source: battery_power
+    unit: kW
+    decimals: 3
+  grid_power_w:
+    source: grid_power
+    unit: W
+    decimals: 0
+  house_load_kw:
+    source: house_load_kw_est
+    unit: kW
+    decimals: 3
+  inverter_temp_c:
+    source: internal_temp
+    unit: "°C"
+    decimals: 1
+  battery_temp_c:
+    source: battery_temp
+    unit: "°C"
+    decimals: 1
+  daily_yield_kwh:
+    source: daily_energy_yield
+    unit: kWh
+    decimals: 2
+
+telemetry_streams:
+  telemetry:
+    interval_hint: 30s
+    offline_after: 3m
+  shadow:
+    interval_hint: 60s
+    offline_after: 5m
+  cmd_ack:
+    interval_hint: ""  # event-driven, no polling

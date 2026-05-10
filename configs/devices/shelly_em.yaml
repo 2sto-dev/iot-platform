@@ -1,0 +1,81 @@
+# Shelly EM — single-channel energy meter with current transformer (CT clamp).
+# Used for whole-house consumption tracking or sub-circuit monitoring.
+
+schema_version: "1.0"
+id: shelly_em
+name: "Shelly EM"
+vendor: shelly
+model: EM
+description: "Single-channel energy meter, MQTT native. Up to 120A via CT."
+
+protocol: mqtt
+
+identification:
+  topic_match:
+    # Shelly publishes leaf-per-field on /emeter/0/<field> (gen1 firmware).
+    # Patterns capture serial = part 2, field = part 4.
+    - pattern: "shellies/+/emeter/0/power"
+      extract:
+        device_id: "$1"
+    - pattern: "shellies/+/emeter/0/voltage"
+      extract:
+        device_id: "$1"
+    - pattern: "shellies/+/emeter/0/current"
+      extract:
+        device_id: "$1"
+    - pattern: "shellies/+/emeter/0/total"
+      extract:
+        device_id: "$1"
+    - pattern: "shellies/+/emeter/0/total_returned"
+      extract:
+        device_id: "$1"
+    - pattern: "shellies/+/relay/0"
+      extract:
+        device_id: "$1"
+    # Schema platform-nativă post-bridge
+    - pattern: "tenants/+/devices/+/up/emeter"
+      extract:
+        tenant_id: "$1"
+        device_id: "$2"
+    - pattern: "tenants/+/devices/+/up/relay"
+      extract:
+        tenant_id: "$1"
+        device_id: "$2"
+
+parser:
+  type: raw
+  # Payload-ul Shelly e plain string per topic (ex: "1234.56" pentru power).
+  # Faza 4 raw parser va folosi ultimul segment al topicului ca field name.
+
+capabilities:
+  - power_meter
+  - smart_meter
+
+normalized_fields:
+  active_power_w:
+    source: power
+    unit: W
+    decimals: 1
+  voltage_v:
+    source: voltage
+    unit: V
+    decimals: 1
+  current_a:
+    source: current
+    unit: A
+    decimals: 3
+  total_consumed_kwh:
+    source: total
+    unit: kWh
+    multiplier: 0.001  # Shelly publica in Wh, normalizam la kWh
+    decimals: 3
+  total_returned_kwh:
+    source: total_returned
+    unit: kWh
+    multiplier: 0.001
+    decimals: 3
+
+telemetry_streams:
+  emeter:
+    interval_hint: 10s
+    offline_after: 60s

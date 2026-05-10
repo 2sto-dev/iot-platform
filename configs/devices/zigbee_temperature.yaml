@@ -1,0 +1,65 @@
+# Generic Zigbee temperature/humidity sensor via Zigbee2MQTT bridge.
+# Examples: Aqara WSDCGQ11LM, Sonoff SNZB-02, Tuya TS0201.
+
+schema_version: "1.0"
+id: zigbee_temperature
+name: "Zigbee Temperature/Humidity Sensor"
+vendor: generic
+description: "Battery-powered Zigbee sensor exposing temperature, humidity, optional pressure. Routed via Zigbee2MQTT bridge."
+
+protocol: mqtt
+
+identification:
+  topic_match:
+    # Zigbee2MQTT publishes full sensor JSON on zigbee2mqtt/<friendly_name>
+    - pattern: "zigbee2mqtt/+"
+      extract:
+        device_id: "$1"
+    # Schema platform-nativă post-bridge
+    - pattern: "tenants/+/devices/+/up/zigbee"
+      extract:
+        tenant_id: "$1"
+        device_id: "$2"
+
+parser:
+  type: json
+  # Z2M payload e flat JSON cu chei standard:
+  # {"temperature":21.5,"humidity":56,"battery":85,"linkquality":42,"voltage":3000}
+
+capabilities:
+  - temperature_sensor
+  - humidity_sensor
+  - battery_powered
+
+normalized_fields:
+  temperature_c:
+    source: temperature
+    unit: "°C"
+    decimals: 1
+  humidity_pct:
+    source: humidity
+    unit: "%"
+    decimals: 0
+  battery_pct:
+    source: battery
+    unit: "%"
+    decimals: 0
+  battery_voltage_mv:
+    source: voltage
+    unit: mV
+    decimals: 0
+  link_quality:
+    source: linkquality
+    unit: lqi
+    decimals: 0
+  pressure_hpa:
+    source: pressure
+    unit: hPa
+    decimals: 1
+
+telemetry_streams:
+  zigbee:
+    # Z2M publica on-change pentru sensors low-power; nu există interval fix.
+    # offline_after generos pentru battery devices care raportează rar.
+    interval_hint: ""
+    offline_after: 4h
