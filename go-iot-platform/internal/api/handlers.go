@@ -12,11 +12,21 @@ import (
 	"go-iot-platform/internal/config"
 	"go-iot-platform/internal/django"
 	"go-iot-platform/internal/influx"
+	"go-iot-platform/internal/runtime"
 )
 
+// Faza 6: runtime manager injectat la RegisterRoutes pentru endpoint-urile /runtime.
+// Nil dacă caller-ul nu îl pasează (acceptabil — endpoint-ul returnează 503).
+var rtMgr *runtime.RuntimeManager
+
 // Înregistrăm rutele API-ului Go.
-func RegisterRoutes(mux *http.ServeMux) {
+//
+// rt poate fi nil dacă RuntimeManager nu e inițializat (mod degradat).
+func RegisterRoutes(mux *http.ServeMux, rt *runtime.RuntimeManager) {
+	rtMgr = rt
 	mux.Handle("/metrics/", http.HandlerFunc(metricsHandler))
+	mux.Handle("/runtime", http.HandlerFunc(runtimeListHandler))
+	mux.Handle("/runtime/", http.HandlerFunc(runtimeGetHandler))
 }
 
 // Claims-urile relevante extrase din JWT după validarea făcută de Kong.

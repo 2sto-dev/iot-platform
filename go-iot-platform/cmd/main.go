@@ -17,6 +17,7 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
 	"github.com/influxdata/influxdb-client-go/v2/api/write"
+	"github.com/redis/go-redis/v9"
 
 	"go-iot-platform/internal/api"
 	"go-iot-platform/internal/buffer"
@@ -28,6 +29,7 @@ import (
 	"go-iot-platform/internal/parsers"
 	"go-iot-platform/internal/ratelimit"
 	"go-iot-platform/internal/registry"
+	"go-iot-platform/internal/runtime"
 	"go-iot-platform/internal/topics"
 )
 
@@ -44,6 +46,10 @@ var (
 	// Topic matcher generic — Faza 3 înlocuiește strings.Contains/HasSuffix din
 	// vechea logică de routing. Nil dacă MATCHER_ENABLED=false sau registry gol.
 	topicMatcher *matcher.Matcher
+
+	// Faza 6: Device Runtime in-memory cu sync optional Redis. Track last_seen,
+	// online status, capabilities, last fields. Detector offline rulează în goroutine.
+	rtMgr *runtime.RuntimeManager
 )
 
 func main() {
@@ -146,10 +152,33 @@ func main() {
 		log.Println("⚠️ MATCHER_ENABLED=false — folosesc routing-ul vechi (strings.Contains)")
 	}
 
+	// Faza 6: Device Runtime + State Engine.
+	// In-memory map cu sync.RWMutex; Redis sync write-through dacă deviceCache disponibil.
+	{
+		var rdb *redis.Client
+		if deviceCache != nil {
+			rdb = deviceCache.Client()
+		}
+		rtMgr = runtime.New(rdb)
+		// Recovery la startup: populează in-memory din Redis dacă există state persistat.
+		if rdb != nil {
+			recoverCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			if err := rtMgr.LoadFromRedis(recoverCtx); err != nil {
+				log.Printf("⚠️ runtime: load from Redis failed: %v (start with empty state)", err)
+			} else if n := rtMgr.LoadedCount(); n > 0 {
+				log.Printf("✅ runtime: recovered %d device(s) from Redis", n)
+			}
+			cancel()
+		}
+		// Background detector: marchează offline device-urile cu last_seen prea vechi.
+		rtMgr.StartOfflineDetector(ctx, 30*time.Second)
+		log.Println("✅ runtime: offline detector started (tick=30s)")
+	}
+
 	go startMQTTSubscriber(ctx, writePool)
 
 	mux := http.NewServeMux()
-	api.RegisterRoutes(mux)
+	api.RegisterRoutes(mux, rtMgr)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("⚠️ Request necunoscut: %s %s", r.Method, r.URL.Path)
 		http.NotFound(w, r)
@@ -441,4 +470,20 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 		"source": pt.Source, "type": pt.Type, "stream": streamID,
 		"device_id": deviceID, "tenant_id": tenantTag,
 	})
+
+	// Faza 6: update DeviceRuntime in-memory pentru last_seen + online tracking.
+	if rtMgr != nil {
+		var caps []string
+		var offlineAfter time.Duration
+		if matchedDD != nil {
+			caps = matchedDD.ResolvedCapabilities
+			// Citim threshold-ul offline din DD.TelemetryStreams[streamID] dacă există.
+			if streamSpec, ok := matchedDD.TelemetryStreams[streamID]; ok && streamSpec.OfflineAfter != "" {
+				if d, err := time.ParseDuration(streamSpec.OfflineAfter); err == nil {
+					offlineAfter = d
+				}
+			}
+		}
+		rtMgr.OnTelemetry(deviceID, deviceTenantID, caps, streamID, pt.Source, pt.Fields, offlineAfter)
+	}
 }

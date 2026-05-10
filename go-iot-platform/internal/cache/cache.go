@@ -44,6 +44,10 @@ type Cache struct {
 	statsMu   sync.Mutex
 }
 
+// Client expune Redis client-ul subiacent pentru reutilizare în alte module
+// (ex: internal/runtime pentru cross-instance state sync).
+func (c *Cache) Client() *redis.Client { return c.rdb }
+
 type Config struct {
 	Addr     string
 	Password string

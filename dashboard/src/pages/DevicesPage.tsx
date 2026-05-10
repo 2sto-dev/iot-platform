@@ -1,7 +1,16 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { api, goApi } from "../lib/api";
 import { canWrite } from "../lib/auth";
+
+interface DeviceRuntime {
+  device_id: string;
+  online: boolean;
+  last_seen: string;
+  capabilities: string[];
+  last_stream?: string;
+  last_source?: string;
+}
 
 interface Device {
   id: number;
@@ -99,6 +108,55 @@ function DeviceModal({ title, form, onChange, onSave, onClose, saving, error, is
   );
 }
 
+function StatusIndicator({ runtime }: { runtime?: DeviceRuntime }) {
+  if (!runtime) {
+    return (
+      <span className="inline-flex items-center gap-1.5" title="No telemetry yet">
+        <span className="w-2 h-2 rounded-full bg-gray-300" />
+        <span className="text-xs text-gray-400">no data</span>
+      </span>
+    );
+  }
+  const ageMs = Date.now() - new Date(runtime.last_seen).getTime();
+  const ageMin = ageMs / 60_000;
+  let color = "bg-gray-300";
+  let pulse = "";
+  let label = "offline";
+  let title = `Last seen ${formatAge(ageMs)}`;
+  if (runtime.online) {
+    if (ageMin < 1) {
+      color = "bg-green-500";
+      pulse = "animate-pulse";
+      label = "online";
+    } else if (ageMin < 5) {
+      color = "bg-yellow-400";
+      label = "stale";
+    } else {
+      color = "bg-orange-400";
+      label = "stale";
+    }
+  } else {
+    color = "bg-red-500";
+    label = "offline";
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5" title={title}>
+      <span className={`w-2 h-2 rounded-full ${color} ${pulse}`} />
+      <span className="text-xs text-gray-600">{label}</span>
+    </span>
+  );
+}
+
+function formatAge(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}min ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
 export default function DevicesPage() {
   const qc = useQueryClient();
   const tenant = localStorage.getItem("tenant_slug") ?? "";
@@ -114,6 +172,14 @@ export default function DevicesPage() {
     queryFn: () => api.get("/devices/").then((r) => r.data),
     refetchInterval: 30_000,
   });
+
+  // Faza 6: live runtime status — poll Go API la 5s. Map serial → runtime.
+  const { data: runtimeList = [] } = useQuery<DeviceRuntime[]>({
+    queryKey: ["runtime", tenant],
+    queryFn: () => goApi.get("/runtime").then((r) => r.data ?? []),
+    refetchInterval: 5_000,
+  });
+  const runtimeBySerial = new Map(runtimeList.map((r) => [r.device_id, r]));
 
   const createMut = useMutation({
     mutationFn: (body: FormState) => api.post("/devices/", body),
@@ -228,7 +294,7 @@ export default function DevicesPage() {
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              {["Serial", "Description", "Type", "Plan", ""].map((h, i) => (
+              {["Status", "Serial", "Description", "Type", "Plan", ""].map((h, i) => (
                 <th key={i} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   {h}
                 </th>
@@ -236,8 +302,11 @@ export default function DevicesPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {devices?.map((d) => (
+            {devices?.map((d) => {
+              const rt = runtimeBySerial.get(d.serial_number);
+              return (
               <tr key={d.id} className="hover:bg-gray-50">
+                <td className="px-4 py-3"><StatusIndicator runtime={rt} /></td>
                 <td className="px-4 py-3 text-sm font-mono text-gray-900">{d.serial_number}</td>
                 <td className="px-4 py-3 text-sm text-gray-700">{d.description || "—"}</td>
                 <td className="px-4 py-3 text-sm text-gray-500">
@@ -269,7 +338,8 @@ export default function DevicesPage() {
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
         {devices?.length === 0 && (
