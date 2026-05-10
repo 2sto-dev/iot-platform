@@ -11,15 +11,12 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
 	"github.com/influxdata/influxdb-client-go/v2/api/write"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 
 	"go-iot-platform/internal/api"
 	"go-iot-platform/internal/buffer"
@@ -28,14 +25,13 @@ import (
 	"go-iot-platform/internal/influx"
 	"go-iot-platform/internal/logging"
 	"go-iot-platform/internal/matcher"
+	"go-iot-platform/internal/parsers"
 	"go-iot-platform/internal/ratelimit"
 	"go-iot-platform/internal/registry"
 	"go-iot-platform/internal/topics"
 )
 
 var (
-	titleCaser = cases.Title(language.Und)
-
 	// Rate limit: 10 msg/s per device (burst 20), 200 msg/s per tenant (burst 400).
 	limiter = ratelimit.New(10, 20, 200, 400)
 
@@ -243,28 +239,9 @@ func startMQTTSubscriber(ctx context.Context, pool *influx.WritePool) {
 	client.Disconnect(250)
 }
 
-// --- Structuri JSON ---
-type StateMessage struct {
-	POWER string `json:"POWER"`
-	RSSI  int    `json:"RSSI"`
-}
-
-type EnergyData struct {
-	Total          float64 `json:"Total"`
-	Today          float64 `json:"Today"`
-	Yesterday      float64 `json:"Yesterday"`
-	Power          float64 `json:"Power"`
-	ApparentPower  float64 `json:"ApparentPower"`
-	ReactivePower  float64 `json:"ReactivePower"`
-	Factor         float64 `json:"Factor"`
-	Voltage        float64 `json:"Voltage"`
-	Current        float64 `json:"Current"`
-}
-
-type SensorMessage struct {
-	Time   string     `json:"Time"`
-	ENERGY EnergyData `json:"ENERGY"`
-}
+// (Faza 4: StateMessage / EnergyData / SensorMessage struct-urile au fost
+//  mutate în internal/parsers/tasmota.go ca structuri private. Vendor parsing
+//  e izolat acolo, cmd/main.go e doar dispatcher.)
 
 // writePoint scrie un punct în Influx pe bucket-ul planului dat. Loghează enqueue-ul structurat.
 func writePoint(p *write.Point, pool *influx.WritePool, plan string, fields logging.Fields) {
@@ -384,43 +361,9 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 		})
 	}
 
+	// Control plane streams — NU produc Influx points. Update direct Django.
 	switch streamID {
-	case "telemetry":
-		// SUN2000 — payload cu array measurements
-		var sun struct {
-			Ts           string                   `json:"ts"`
-			Measurements []map[string]interface{} `json:"measurements"`
-			HouseLoad    float64                  `json:"house_load_kw_est"`
-		}
-		if err := json.Unmarshal(payload, &sun); err == nil && len(sun.Measurements) > 0 {
-			fields := make(map[string]interface{}, len(sun.Measurements)+1)
-			for _, m := range sun.Measurements {
-				if key, ok := m["key"].(string); ok {
-					if val, ok := m["value"]; ok {
-						fields[key] = val
-					}
-				}
-			}
-			if sun.HouseLoad != 0 {
-				fields["house_load_kw_est"] = sun.HouseLoad
-			}
-			t := time.Now()
-			if sun.Ts != "" {
-				if pt, err := time.Parse(time.RFC3339, sun.Ts); err == nil {
-					t = pt
-				}
-			}
-			p := influxdb2.NewPoint("devices",
-				map[string]string{"device": deviceID, "source": "sun2000", "type": "solar_inverter", "tenant_id": tenantTag},
-				fields, t)
-			writePoint(p, pool, tenantPlan, logging.Fields{
-				"source": "sun2000", "type": "solar_inverter", "device_id": deviceID, "tenant_id": tenantTag,
-			})
-		}
-		return
-
 	case "cmd_ack":
-		// Faza 3.3: ACK pentru comenzi downlink
 		var ack struct {
 			CommandID int64          `json:"command_id"`
 			Success   bool           `json:"success"`
@@ -440,7 +383,6 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 		return
 
 	case "ota":
-		// Faza 3.5: OTA status raportat de device
 		var ota struct {
 			FirmwareID int64  `json:"firmware_id"`
 			Status     string `json:"status"`
@@ -456,7 +398,6 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 		return
 
 	case "shadow":
-		// Faza 3.4: shadow reported de la device
 		var reported map[string]interface{}
 		if err := json.Unmarshal(payload, &reported); err != nil {
 			logging.Drop("shadow parse failed", logging.Fields{"error": err.Error(), "device_id": deviceID})
@@ -466,143 +407,38 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 			logging.Warn("UpdateShadowReported failed", logging.Fields{"device_id": deviceID, "error": err.Error()})
 		}
 		return
+	}
 
-	case "emeter":
-		// Shelly EM — payload e plain string per topic (ex: "1234.56")
-		// Field-ul e ultimul segment al topicului ("power", "voltage", etc.)
-		valStr := string(payload)
-		var value float64
-		if _, err := fmt.Sscanf(valStr, "%f", &value); err != nil {
-			log.Printf("❌ Eroare conversie la float pentru %s: %v", valStr, err)
-			return
-		}
-		topicParts := strings.Split(topic, "/")
-		field := topicParts[len(topicParts)-1]
-		p := influxdb2.NewPoint("devices",
-			map[string]string{"device": deviceID, "source": "shelly", "type": "power_meter", "tenant_id": tenantTag},
-			map[string]interface{}{titleCaser.String(field): value},
-			time.Now())
-		writePoint(p, pool, tenantPlan, logging.Fields{
-			"source": "shelly", "field": field, "value": value, "device_id": deviceID, "tenant_id": tenantTag,
-		})
-		return
-
-	case "relay":
-		// Shelly relay — payload "on"/"off"
-		valStr := strings.ToLower(string(payload))
-		state := 0
-		if valStr == "on" {
-			state = 1
-		}
-		p := influxdb2.NewPoint("devices",
-			map[string]string{"device": deviceID, "source": "shelly", "type": "relay", "tenant_id": tenantTag},
-			map[string]interface{}{"state": state},
-			time.Now())
-		writePoint(p, pool, tenantPlan, logging.Fields{
-			"source": "shelly", "type": "relay", "state": state, "device_id": deviceID, "tenant_id": tenantTag,
-		})
-		return
-
-	case "state":
-		// Tasmota STATE — Scriem AMBELE:
-		//   relay_state — string "ON"/"OFF" (audit, lizibil)
-		//   relay_on    — int 1/0 (pentru polling/UI confirmation)
-		var state StateMessage
-		if err := json.Unmarshal(payload, &state); err != nil {
-			logging.Drop("parse STATE failed", logging.Fields{"error": err.Error(), "topic": topic, "device_id": deviceID})
-			return
-		}
-		relayOn := 0
-		if strings.EqualFold(state.POWER, "ON") {
-			relayOn = 1
-		}
-		p := influxdb2.NewPoint("devices",
-			map[string]string{"device": deviceID, "source": "nousat", "type": "state", "tenant_id": tenantTag},
-			map[string]interface{}{
-				"relay_state": state.POWER,
-				"relay_on":    relayOn,
-				"rssi":        state.RSSI,
-			},
-			time.Now())
-		writePoint(p, pool, tenantPlan, logging.Fields{
-			"source": "nousat", "type": "state", "device_id": deviceID, "tenant_id": tenantTag,
-		})
-		return
-
-	case "sensor":
-		// Tasmota SENSOR — payload cu nested ENERGY object
-		// Folosim prefix `nousat_` pentru toate field-urile ca să evităm type conflicts
-		// pe scopul global al measurement="devices".
-		var sensor SensorMessage
-		if err := json.Unmarshal(payload, &sensor); err != nil {
-			logging.Drop("parse SENSOR failed", logging.Fields{"error": err.Error(), "topic": topic, "device_id": deviceID})
-			return
-		}
-		t, err := time.Parse(time.RFC3339, sensor.Time)
-		if err != nil {
-			t = time.Now()
-		}
-		p := influxdb2.NewPoint("devices",
-			map[string]string{"device": deviceID, "source": "nousat", "type": "energy", "tenant_id": tenantTag},
-			map[string]interface{}{
-				"nousat_power":          sensor.ENERGY.Power,
-				"nousat_apparent_power": sensor.ENERGY.ApparentPower,
-				"nousat_reactive_power": sensor.ENERGY.ReactivePower,
-				"nousat_power_factor":   sensor.ENERGY.Factor,
-				"nousat_voltage":        sensor.ENERGY.Voltage,
-				"nousat_current":        sensor.ENERGY.Current,
-				"nousat_total":          sensor.ENERGY.Total,
-				"nousat_today":          sensor.ENERGY.Today,
-				"nousat_yesterday":      sensor.ENERGY.Yesterday,
-			},
-			t)
-		writePoint(p, pool, tenantPlan, logging.Fields{
-			"source": "nousat", "type": "energy", "device_id": deviceID, "tenant_id": tenantTag,
-		})
-		return
-
-	case "zigbee":
-		// Zigbee2MQTT — flat JSON cu chei standard
-		var data map[string]interface{}
-		if err := json.Unmarshal(payload, &data); err != nil {
-			logging.Drop("parse zigbee2mqtt failed", logging.Fields{"error": err.Error(), "topic": topic, "device_id": deviceID})
-			return
-		}
-		p := influxdb2.NewPoint("devices",
-			map[string]string{"device": deviceID, "source": "zigbee2mqtt", "type": "sensor", "tenant_id": tenantTag},
-			data,
-			time.Now())
-		writePoint(p, pool, tenantPlan, logging.Fields{
-			"source": "zigbee2mqtt", "type": "sensor", "device_id": deviceID, "tenant_id": tenantTag,
-		})
-		return
-
-	default:
-		// Generic / auto_detected fallback — pentru topice care nu match nici un DD.
-		var data map[string]interface{}
-		if err := json.Unmarshal(payload, &data); err == nil {
-			p := influxdb2.NewPoint("devices",
-				map[string]string{"device": deviceID, "source": "generic", "type": "auto_detected", "tenant_id": tenantTag},
-				data,
-				time.Now())
-			writePoint(p, pool, tenantPlan, logging.Fields{
-				"source": "generic", "type": "auto_detected", "device_id": deviceID, "tenant_id": tenantTag,
-			})
-		} else {
-			valStr := string(payload)
-			var val interface{}
-			if f, err := strconv.ParseFloat(valStr, 64); err == nil {
-				val = f
-			} else {
-				val = valStr
-			}
-			p := influxdb2.NewPoint("devices",
-				map[string]string{"device": deviceID, "source": "generic", "type": "auto_detected", "tenant_id": tenantTag},
-				map[string]interface{}{"value": val},
-				time.Now())
-			writePoint(p, pool, tenantPlan, logging.Fields{
-				"source": "generic", "type": "auto_detected_simple", "device_id": deviceID, "tenant_id": tenantTag,
-			})
+	// Data streams — Faza 4: parser engine generic.
+	// Routing pe streamID e făcut intern în parsers.Parse(). Output uniform
+	// (ParsedTelemetry) → un singur cod path la NewPoint + writePoint.
+	var matchedDD *registry.DeviceDefinition
+	var matchedExtracted map[string]string
+	if topicMatcher != nil {
+		if mch := topicMatcher.Match(topic); mch != nil {
+			matchedDD = mch.Definition
+			matchedExtracted = mch.Extracted
 		}
 	}
+
+	pt, err := parsers.Parse(streamID, topic, payload, matchedDD, matchedExtracted)
+	if err != nil {
+		logging.Drop("parser failed", logging.Fields{
+			"error": err.Error(), "stream": streamID, "topic": topic, "device_id": deviceID,
+		})
+		return
+	}
+
+	point := influxdb2.NewPoint("devices",
+		map[string]string{
+			"device":    deviceID,
+			"source":    pt.Source,
+			"type":      pt.Type,
+			"tenant_id": tenantTag,
+		},
+		pt.Fields, pt.Timestamp)
+	writePoint(point, pool, tenantPlan, logging.Fields{
+		"source": pt.Source, "type": pt.Type, "stream": streamID,
+		"device_id": deviceID, "tenant_id": tenantTag,
+	})
 }
