@@ -64,25 +64,34 @@ type IdentificationSpec struct {
 	TopicMatch []TopicMatchSpec `yaml:"topic_match" json:"topic_match"`
 }
 
-// TopicMatchSpec — un pattern individual de matching topic + reguli extragere.
+// TopicMatchSpec — un pattern individual de matching topic + reguli extragere
+// + identificator stream logic.
 //
-// Pattern syntax acceptată (interpretată în Faza 3):
+// Pattern syntax acceptată (interpretată în Faza 3 — internal/matcher):
 //   - "+" wildcard single-level (MQTT-style): "tele/+/SENSOR"
-//   - "#" wildcard multi-level: "tenants/+/devices/+/up/#"
-//   - regex literal când prefix cu `~`: "~^/(\\d+)/(\\w+)/.*/telemetry$"
+//   - "#" wildcard multi-level (TREBUIE ultim segment): "tenants/+/devices/+/up/#"
+//   - regex literal când prefix cu `~`: "~^/(?P<sn>\\d+)/.*/telemetry$"
 //
-// Capture groups (`+` poziții sau regex groups) se extrag în map prin câmpul
-// `extract` care leagă numele variabilei la indexul/numele grupului.
+// Capture groups (`+` poziții pentru MQTT, regex groups pentru ~) se extrag
+// în map prin câmpul `extract` care leagă numele variabilei la indexul (`$N`)
+// sau numele grupului regex.
+//
+// Stream e identificatorul logic al tipului de mesaj — folosit de dispatcher
+// în cmd/main.go pentru a decide handler-ul (telemetry / state / sensor /
+// cmd_ack / shadow / ota / emeter / relay / zigbee).
 //
 // Exemplu YAML:
 //
 //	topic_match:
 //	  - pattern: "tele/+/SENSOR"
+//	    stream: "sensor"
 //	    extract: { device_id: "$1" }
 //	  - pattern: "~^/(?P<sn>\\d+)/.*/telemetry$"
+//	    stream: "telemetry"
 //	    extract: { device_id: "sn" }
 type TopicMatchSpec struct {
 	Pattern string            `yaml:"pattern" json:"pattern"`
+	Stream  string            `yaml:"stream,omitempty" json:"stream,omitempty"`
 	Extract map[string]string `yaml:"extract,omitempty" json:"extract,omitempty"`
 }
 

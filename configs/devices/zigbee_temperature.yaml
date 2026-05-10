@@ -13,10 +13,12 @@ identification:
   topic_match:
     # Zigbee2MQTT publishes full sensor JSON on zigbee2mqtt/<friendly_name>
     - pattern: "zigbee2mqtt/+"
+      stream: "zigbee"
       extract:
         device_id: "$1"
     # Schema platform-nativă post-bridge
     - pattern: "tenants/+/devices/+/up/zigbee"
+      stream: "zigbee"
       extract:
         tenant_id: "$1"
         device_id: "$2"

@@ -27,7 +27,9 @@ import (
 	"go-iot-platform/internal/django"
 	"go-iot-platform/internal/influx"
 	"go-iot-platform/internal/logging"
+	"go-iot-platform/internal/matcher"
 	"go-iot-platform/internal/ratelimit"
+	"go-iot-platform/internal/registry"
 	"go-iot-platform/internal/topics"
 )
 
@@ -42,6 +44,10 @@ var (
 
 	// Cache device→tenant cu Redis ca primary store + fallback Django (Faza 2.4).
 	deviceCache *cache.Cache
+
+	// Topic matcher generic — Faza 3 înlocuiește strings.Contains/HasSuffix din
+	// vechea logică de routing. Nil dacă MATCHER_ENABLED=false sau registry gol.
+	topicMatcher *matcher.Matcher
 )
 
 func main() {
@@ -119,6 +125,29 @@ func main() {
 		}
 	} else {
 		log.Println("⚠️ REDIS_ADDR not set; cache disabled, fallback la GetAllDevices() per-message")
+	}
+
+	// Faza 3: Topic Matcher generic — încarcă Device Definitions YAML și compile-uiește
+	// patterns. Înlocuiește lanțul `strings.Contains/HasSuffix` din handleMessage.
+	if os.Getenv("MATCHER_ENABLED") != "false" {
+		ddDir := os.Getenv("DD_DIR")
+		if ddDir == "" {
+			ddDir = "../configs/devices" // relativ la go-iot-platform/ când rulezi din bin/
+		}
+		reg, err := registry.LoadDirOrLog(ddDir, false)
+		if err != nil {
+			log.Printf("⚠️ registry load %q failed: %v (matcher dezactivat)", ddDir, err)
+		} else {
+			m, mErrs := matcher.New(reg)
+			for _, e := range mErrs {
+				log.Printf("⚠️ matcher compile: %v", e)
+			}
+			topicMatcher = m
+			log.Printf("✅ topic matcher: %d patterns from %d device definitions",
+				m.Count(), reg.Count())
+		}
+	} else {
+		log.Println("⚠️ MATCHER_ENABLED=false — folosesc routing-ul vechi (strings.Contains)")
 	}
 
 	go startMQTTSubscriber(ctx, writePool)
@@ -332,8 +361,32 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 		})
 	}
 
-	// SUN2000 (și alte device-uri cu stream "telemetry"): payload cu array measurements
-	if parsed.Stream == "telemetry" {
+	// ── Faza 3: Stream-based dispatcher ───────────────────────────────────
+	// Determinăm `streamID` prin matcher (preferred) sau fallback la parsed.Stream
+	// din topics.Parse. Toate handler-urile (cmd_ack/ota/shadow/telemetry/state/
+	// sensor/emeter/relay/zigbee/generic) sunt dispatch-uite pe baza acestui ID.
+	// Asta înlocuiește lanțul de `strings.Contains/HasSuffix` din versiunea pre-Faza-3.
+	streamID := ""
+	var matchedDDID string
+	if topicMatcher != nil {
+		if mch := topicMatcher.Match(topic); mch != nil {
+			streamID = mch.Stream
+			matchedDDID = mch.Definition.ID
+		}
+	}
+	if streamID == "" {
+		streamID = parsed.Stream
+	}
+
+	if matchedDDID != "" {
+		logging.Info("matcher hit", logging.Fields{
+			"topic": topic, "dd_id": matchedDDID, "stream": streamID,
+		})
+	}
+
+	switch streamID {
+	case "telemetry":
+		// SUN2000 — payload cu array measurements
 		var sun struct {
 			Ts           string                   `json:"ts"`
 			Measurements []map[string]interface{} `json:"measurements"`
@@ -365,10 +418,9 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 			})
 		}
 		return
-	}
 
-	// Faza 3.3: ACK pentru comenzi downlink
-	if strings.HasSuffix(topic, "/up/cmd_ack") || parsed.Stream == "cmd_ack" {
+	case "cmd_ack":
+		// Faza 3.3: ACK pentru comenzi downlink
 		var ack struct {
 			CommandID int64          `json:"command_id"`
 			Success   bool           `json:"success"`
@@ -386,10 +438,9 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 			logging.Warn("AckCommand failed", logging.Fields{"cmd_id": ack.CommandID, "error": err.Error()})
 		}
 		return
-	}
 
-	// Faza 3.5: OTA status raportat de device
-	if strings.HasSuffix(topic, "/up/ota") || parsed.Stream == "ota" {
+	case "ota":
+		// Faza 3.5: OTA status raportat de device
 		var ota struct {
 			FirmwareID int64  `json:"firmware_id"`
 			Status     string `json:"status"`
@@ -403,10 +454,9 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 			logging.Warn("UpdateOTAStatus failed", logging.Fields{"device_id": deviceID, "error": err.Error()})
 		}
 		return
-	}
 
-	// Faza 3.4: shadow reported de la device
-	if strings.HasSuffix(topic, "/up/shadow") || parsed.Stream == "shadow" {
+	case "shadow":
+		// Faza 3.4: shadow reported de la device
 		var reported map[string]interface{}
 		if err := json.Unmarshal(payload, &reported); err != nil {
 			logging.Drop("shadow parse failed", logging.Fields{"error": err.Error(), "device_id": deviceID})
@@ -416,10 +466,10 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 			logging.Warn("UpdateShadowReported failed", logging.Fields{"device_id": deviceID, "error": err.Error()})
 		}
 		return
-	}
 
-	// Scriere în Influx (cu loguri pe fiecare caz)
-	if strings.Contains(topic, "/emeter/0/") {
+	case "emeter":
+		// Shelly EM — payload e plain string per topic (ex: "1234.56")
+		// Field-ul e ultimul segment al topicului ("power", "voltage", etc.)
 		valStr := string(payload)
 		var value float64
 		if _, err := fmt.Sscanf(valStr, "%f", &value); err != nil {
@@ -435,8 +485,10 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 		writePoint(p, pool, tenantPlan, logging.Fields{
 			"source": "shelly", "field": field, "value": value, "device_id": deviceID, "tenant_id": tenantTag,
 		})
+		return
 
-	} else if strings.Contains(topic, "/relay/0") {
+	case "relay":
+		// Shelly relay — payload "on"/"off"
 		valStr := strings.ToLower(string(payload))
 		state := 0
 		if valStr == "on" {
@@ -449,13 +501,12 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 		writePoint(p, pool, tenantPlan, logging.Fields{
 			"source": "shelly", "type": "relay", "state": state, "device_id": deviceID, "tenant_id": tenantTag,
 		})
+		return
 
-	} else if strings.HasSuffix(strings.ToLower(topic), "/state") {
-		// Tasmota STATE — accepta atat /STATE original cat si /state lowercase (bridge).
-		// Scriem AMBELE:
+	case "state":
+		// Tasmota STATE — Scriem AMBELE:
 		//   relay_state — string "ON"/"OFF" (audit, lizibil)
-		//   relay_on    — int 1/0 (pentru polling/UI confirmation; Go API
-		//                 nu returneaza string, deci numeric e necesar)
+		//   relay_on    — int 1/0 (pentru polling/UI confirmation)
 		var state StateMessage
 		if err := json.Unmarshal(payload, &state); err != nil {
 			logging.Drop("parse STATE failed", logging.Fields{"error": err.Error(), "topic": topic, "device_id": deviceID})
@@ -476,9 +527,12 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 		writePoint(p, pool, tenantPlan, logging.Fields{
 			"source": "nousat", "type": "state", "device_id": deviceID, "tenant_id": tenantTag,
 		})
+		return
 
-	} else if strings.HasSuffix(strings.ToLower(topic), "/sensor") {
-		// Tasmota SENSOR — atât topic original /SENSOR cât și schema noua /sensor (translate de bridge).
+	case "sensor":
+		// Tasmota SENSOR — payload cu nested ENERGY object
+		// Folosim prefix `nousat_` pentru toate field-urile ca să evităm type conflicts
+		// pe scopul global al measurement="devices".
 		var sensor SensorMessage
 		if err := json.Unmarshal(payload, &sensor); err != nil {
 			logging.Drop("parse SENSOR failed", logging.Fields{"error": err.Error(), "topic": topic, "device_id": deviceID})
@@ -488,9 +542,6 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 		if err != nil {
 			t = time.Now()
 		}
-		// Folosim prefix `nousat_` pentru toate field-urile ca sa eviti type conflicts
-		// pe scopul global al measurement="devices" (alte device-uri pot avea field
-		// cu acelasi nume dar tip diferit — ex: `power` a fost cuplat cu string ON/OFF).
 		p := influxdb2.NewPoint("devices",
 			map[string]string{"device": deviceID, "source": "nousat", "type": "energy", "tenant_id": tenantTag},
 			map[string]interface{}{
@@ -508,8 +559,10 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 		writePoint(p, pool, tenantPlan, logging.Fields{
 			"source": "nousat", "type": "energy", "device_id": deviceID, "tenant_id": tenantTag,
 		})
+		return
 
-	} else if strings.HasPrefix(topic, "zigbee2mqtt/") {
+	case "zigbee":
+		// Zigbee2MQTT — flat JSON cu chei standard
 		var data map[string]interface{}
 		if err := json.Unmarshal(payload, &data); err != nil {
 			logging.Drop("parse zigbee2mqtt failed", logging.Fields{"error": err.Error(), "topic": topic, "device_id": deviceID})
@@ -522,8 +575,10 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 		writePoint(p, pool, tenantPlan, logging.Fields{
 			"source": "zigbee2mqtt", "type": "sensor", "device_id": deviceID, "tenant_id": tenantTag,
 		})
+		return
 
-	} else {
+	default:
+		// Generic / auto_detected fallback — pentru topice care nu match nici un DD.
 		var data map[string]interface{}
 		if err := json.Unmarshal(payload, &data); err == nil {
 			p := influxdb2.NewPoint("devices",
