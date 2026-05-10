@@ -4,6 +4,7 @@ import LoginPage from "./pages/LoginPage";
 import Layout from "./components/Layout";
 import DevicesPage from "./pages/DevicesPage";
 import SolarPage from "./pages/SolarPage";
+import BoilerPage from "./pages/BoilerPage";
 import RulesPage from "./pages/RulesPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import AuditPage from "./pages/AuditPage";
@@ -27,6 +28,7 @@ export default function App() {
         <Route index element={<Navigate to="/devices" replace />} />
         <Route path="devices" element={<DevicesPage />} />
         <Route path="solar" element={<SolarPage />} />
+        <Route path="boiler" element={<BoilerPage />} />
         <Route path="rules" element={<RulesPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="audit" element={<AuditPage />} />

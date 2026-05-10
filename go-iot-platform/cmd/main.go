@@ -445,7 +445,8 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 			"source": "shelly", "type": "relay", "state": state, "device_id": deviceID, "tenant_id": tenantTag,
 		})
 
-	} else if strings.HasSuffix(topic, "/STATE") {
+	} else if strings.HasSuffix(strings.ToLower(topic), "/state") {
+		// Tasmota STATE — accepta atat /STATE original cat si /state lowercase (bridge).
 		var state StateMessage
 		if err := json.Unmarshal(payload, &state); err != nil {
 			logging.Drop("parse STATE failed", logging.Fields{"error": err.Error(), "topic": topic, "device_id": deviceID})
@@ -453,13 +454,14 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 		}
 		p := influxdb2.NewPoint("devices",
 			map[string]string{"device": deviceID, "source": "nousat", "type": "state", "tenant_id": tenantTag},
-			map[string]interface{}{"POWER": state.POWER, "RSSI": state.RSSI},
+			map[string]interface{}{"power": state.POWER, "rssi": state.RSSI},
 			time.Now())
 		writePoint(p, pool, tenantPlan, logging.Fields{
 			"source": "nousat", "type": "state", "device_id": deviceID, "tenant_id": tenantTag,
 		})
 
-	} else if strings.HasSuffix(topic, "/SENSOR") {
+	} else if strings.HasSuffix(strings.ToLower(topic), "/sensor") {
+		// Tasmota SENSOR — atât topic original /SENSOR cât și schema noua /sensor (translate de bridge).
 		var sensor SensorMessage
 		if err := json.Unmarshal(payload, &sensor); err != nil {
 			logging.Drop("parse SENSOR failed", logging.Fields{"error": err.Error(), "topic": topic, "device_id": deviceID})
@@ -472,10 +474,10 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 		p := influxdb2.NewPoint("devices",
 			map[string]string{"device": deviceID, "source": "nousat", "type": "energy", "tenant_id": tenantTag},
 			map[string]interface{}{
-				"Power":   sensor.ENERGY.Power,
-				"Voltage": sensor.ENERGY.Voltage,
-				"Current": sensor.ENERGY.Current,
-				"Total":   sensor.ENERGY.Total,
+				"power":   sensor.ENERGY.Power,
+				"voltage": sensor.ENERGY.Voltage,
+				"current": sensor.ENERGY.Current,
+				"total":   sensor.ENERGY.Total,
 			},
 			t)
 		writePoint(p, pool, tenantPlan, logging.Fields{

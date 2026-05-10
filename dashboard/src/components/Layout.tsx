@@ -12,6 +12,7 @@ interface Device {
 const allLinks = [
   { to: "/devices", label: "Devices", requireDevice: null },
   { to: "/solar", label: "Solar", requireDevice: "sun2000" },
+  { to: "/boiler", label: "Boiler", requireDevice: "nous_at" },
   { to: "/rules", label: "Rules", requireDevice: null },
   { to: "/notifications", label: "Notifications", requireDevice: null },
   { to: "/audit", label: "Audit Log", requireDevice: null },
