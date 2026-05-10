@@ -130,13 +130,17 @@ func main() {
 		http.NotFound(w, r)
 	})
 
+	apiPort := os.Getenv("API_PORT")
+	if apiPort == "" {
+		apiPort = "8090"
+	}
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    "0.0.0.0:" + apiPort,
 		Handler: api.EnableCORS(http.StripPrefix("/go", mux)),
 	}
 
 	go func() {
-		log.Println("✅ API Go disponibil pe http://localhost:8080/go/* prin Kong")
+		log.Printf("✅ API Go disponibil pe http://localhost:%s/go/*", apiPort)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("server error: %v", err)
 		}
@@ -174,6 +178,7 @@ func startMQTTSubscriber(ctx context.Context, pool *influx.WritePool) {
 
 	subscriptions := []string{
 		"$share/ingest/tenants/+/devices/+/up/#", // schema nouă (Faza 2.1)
+		"$share/ingest/tenants/+/devices/+/up/cmd_ack", // Faza 3.3 ACK downlink
 		// Legacy fallback patterns — eliminate când Faza 2.2 (bridge) e activ în prod.
 		"$share/ingest-legacy/shellies/+/#",
 		"$share/ingest-legacy/tele/+/#",
@@ -320,6 +325,92 @@ func handleMessage(msg mqtt.Message, pool *influx.WritePool) {
 		logging.Warn("unknown device — tenant=unassigned", logging.Fields{
 			"device_id": deviceID, "topic": topic,
 		})
+	}
+
+	// SUN2000 (și alte device-uri cu stream "telemetry"): payload cu array measurements
+	if parsed.Stream == "telemetry" {
+		var sun struct {
+			Ts           string                   `json:"ts"`
+			Measurements []map[string]interface{} `json:"measurements"`
+			HouseLoad    float64                  `json:"house_load_kw_est"`
+		}
+		if err := json.Unmarshal(payload, &sun); err == nil && len(sun.Measurements) > 0 {
+			fields := make(map[string]interface{}, len(sun.Measurements)+1)
+			for _, m := range sun.Measurements {
+				if key, ok := m["key"].(string); ok {
+					if val, ok := m["value"]; ok {
+						fields[key] = val
+					}
+				}
+			}
+			if sun.HouseLoad != 0 {
+				fields["house_load_kw_est"] = sun.HouseLoad
+			}
+			t := time.Now()
+			if sun.Ts != "" {
+				if pt, err := time.Parse(time.RFC3339, sun.Ts); err == nil {
+					t = pt
+				}
+			}
+			p := influxdb2.NewPoint("devices",
+				map[string]string{"device": deviceID, "source": "sun2000", "type": "solar_inverter", "tenant_id": tenantTag},
+				fields, t)
+			writePoint(p, pool, tenantPlan, logging.Fields{
+				"source": "sun2000", "type": "solar_inverter", "device_id": deviceID, "tenant_id": tenantTag,
+			})
+		}
+		return
+	}
+
+	// Faza 3.3: ACK pentru comenzi downlink
+	if strings.HasSuffix(topic, "/up/cmd_ack") || parsed.Stream == "cmd_ack" {
+		var ack struct {
+			CommandID int64          `json:"command_id"`
+			Success   bool           `json:"success"`
+			Result    map[string]any `json:"result"`
+		}
+		if err := json.Unmarshal(payload, &ack); err != nil {
+			logging.Drop("cmd_ack parse failed", logging.Fields{"error": err.Error(), "device_id": deviceID})
+			return
+		}
+		cmdStatus := "executed"
+		if !ack.Success {
+			cmdStatus = "failed"
+		}
+		if err := django.AckCommand(ack.CommandID, cmdStatus, ack.Result); err != nil {
+			logging.Warn("AckCommand failed", logging.Fields{"cmd_id": ack.CommandID, "error": err.Error()})
+		}
+		return
+	}
+
+	// Faza 3.5: OTA status raportat de device
+	if strings.HasSuffix(topic, "/up/ota") || parsed.Stream == "ota" {
+		var ota struct {
+			FirmwareID int64  `json:"firmware_id"`
+			Status     string `json:"status"`
+			Error      string `json:"error"`
+		}
+		if err := json.Unmarshal(payload, &ota); err != nil {
+			logging.Drop("ota parse failed", logging.Fields{"error": err.Error(), "device_id": deviceID})
+			return
+		}
+		if err := django.UpdateOTAStatus(deviceID, ota.FirmwareID, ota.Status, ota.Error); err != nil {
+			logging.Warn("UpdateOTAStatus failed", logging.Fields{"device_id": deviceID, "error": err.Error()})
+		}
+		return
+	}
+
+	// Faza 3.4: shadow reported de la device
+	if strings.HasSuffix(topic, "/up/shadow") || parsed.Stream == "shadow" {
+		var reported map[string]interface{}
+		if err := json.Unmarshal(payload, &reported); err != nil {
+			logging.Drop("shadow parse failed", logging.Fields{"error": err.Error(), "device_id": deviceID})
+			return
+		}
+		if err := django.UpdateShadowReported(deviceID, reported); err != nil {
+			logging.Warn("UpdateShadowReported failed", logging.Fields{"device_id": deviceID, "error": err.Error()})
+		}
+		return
 	}
 
 	// Scriere în Influx (cu loguri pe fiecare caz)

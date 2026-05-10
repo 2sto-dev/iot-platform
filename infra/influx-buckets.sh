@@ -2,17 +2,17 @@
 # Faza 2.7 — Creare bucket-uri InfluxDB cu retention per plan
 # Rulează pe VM-ul cu InfluxDB sau local cu acces la API-ul Influx.
 #
-# Usage:
-#   INFLUX_URL=http://172.16.0.105:8086 \
-#   INFLUX_TOKEN=<admin-token> \
-#   INFLUX_ORG=<org-name> \
+# Usage (cu credențiale implicite din .env):
 #   bash influx-buckets.sh
+#
+# Override:
+#   INFLUX_URL=http://... INFLUX_TOKEN=<token> INFLUX_ORG=<org> bash influx-buckets.sh
 
 set -euo pipefail
 
-INFLUX_URL="${INFLUX_URL:-http://localhost:8086}"
-INFLUX_TOKEN="${INFLUX_TOKEN:?INFLUX_TOKEN must be set}"
-INFLUX_ORG="${INFLUX_ORG:?INFLUX_ORG must be set}"
+INFLUX_URL="${INFLUX_URL:-http://db-flux.airweb.ro:8086}"
+INFLUX_TOKEN="${INFLUX_TOKEN:-teXchv0yTR4y4lCrrUDam_mo2H8l-OlZM4D7gRVAE80ZEeloRT1kYTjPXFoHsbRmp107O96-4kgNEk1YAzTH3A==}"
+INFLUX_ORG="${INFLUX_ORG:-xCore}"
 
 INFLUX_CLI="influx"
 

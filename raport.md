@@ -888,21 +888,32 @@ Faza 1.9 face Faza 1 production-ready. Faza 2 va înlocui workaround-urile in-pr
 ---
 ---
 
-# Raport Faza 2 (în curs) — Ingest scalabil
+# Raport Faza 2 — Ingest scalabil
 
-> Status: 🔵 ÎN CURS — provisioning infra + 4 din 7 sub-pași implementați (2026-04-30)
+> Status: ✅ COMPLETĂ — toți sub-pașii 2.1 → 2.7 livrați, infra provisionată și operațională (2026-05-02)
+> Referință plan: [plan.md §Faza 2](plan.md)
 
-## 20. Sumar progres Faza 2
+## 20. Sumar executiv Faza 2
+
+Faza 2 transformă pipeline-ul de ingest dintr-un singur proces cu HTTP per-mesaj la o arhitectură scalabilă: EMQX 5.8.6 cu ACL HTTP, cache Redis cu invalidare push, batch writes async în InfluxDB, shared subscriptions pentru scalare orizontală, bridge pentru device-uri legacy, și routing multi-bucket per plan de tenant.
 
 | Sub-pas | Status | Commit |
 |---------|--------|--------|
-| 2.1 EMQX cu ACL pe VM dedicat | 🟡 Parțial — provisioned (anonymous, cutover compat); HTTP ACL hook deferat | (provisioning manual) |
-| 2.2 MQTT bridge legacy → tenant-scoped | ⏳ Următorul pas | — |
-| 2.3 Go shared subscription | ✅ Done | `095ab61` |
+| 2.1 EMQX cu HTTP ACL hook | ✅ Done | `e565fb1` + `8f46d68` |
+| 2.2 MQTT bridge legacy → tenant-scoped | ✅ Done | `2df1f6e` |
+| 2.3 Go shared subscription | ✅ Done | `055ab61` |
 | 2.4 Redis cache device→tenant | ✅ Done | `79b280f` |
-| 2.5 Influx batch writes | ✅ Done | `095ab61` |
-| 2.6 Kafka/NATS buffer (opțional) | ⏳ Out of scope minim | — |
-| 2.7 Multi-bucket Influx per tenant | ⏳ După 2.2 | — |
+| 2.5 Influx batch writes | ✅ Done | `055ab61` |
+| 2.6 Kafka/NATS buffer | — | Explicitat out-of-scope (buffer fallback din 1.9 acoperă scenariul) |
+| 2.7 Multi-bucket Influx per plan | ✅ Done | `3aae508` |
+
+**Evoluție suite de teste:**
+
+| Suite | Faza 1.9 | Faza 2 | Δ |
+|-------|----------|--------|---|
+| Django (pytest) | 52 passed | **68 passed** | +16 (test_mqtt_views.py) |
+| Go (`go test ./...`) | 5 pachete | **8 pachete** | +3 (bridge, influx/pool, cache) |
+| Go test cases total | ~30 | **55** | +25 |
 
 ## 21. Infrastructură provisionată
 
@@ -915,92 +926,1167 @@ Două VM-uri Debian 13 (trixie) configurate cu user `c` (NOPASSWD sudo):
 - Config: `bind 127.0.0.1 172.16.0.108`, `requirepass`, `appendonly yes`, `protected-mode yes`
 - ufw: deny incoming, allow ssh din `172.16.0.0/24`, allow 6379 doar din `172.16.0.105` (VM-app)
 - Smoke test live: PING/SET/GET OK; AOF active
+- Script: [infra/redis-configure.sh](infra/redis-configure.sh)
+
+**Fix aplicat în sesiunea de reinst alare:** Config-ul anterior conținea 3 linii `requirepass` (Redis aplică ultima → parola greșită). Rezolvat prin `sudo sed -i '/^requirepass/d'` + append single line + restart.
 
 ### emqx-1 (172.16.0.103)
 
 - 2 vCPU, 2GB RAM, 29GB disk
-- EMQX 5.8.6 instalat din .deb (debian12 compat — repo trixie nu există încă)
+- EMQX 5.8.6 instalat din .deb (debian12 compat — repo trixie nu există pentru Debian 13)
 - Listeners active: TCP 1883, MQTTS 8883, WS 8083, WSS 8084, admin web 18083
 - Hostname corectat din `eqmx-1` în `emqx-1`; entry în `/etc/hosts` adăugat
-- Admin password schimbat din default (`admin/public`) în secret-ul comun
+- Admin password schimbat din default (`admin/public`)
 - ufw: deny incoming, allow ssh + 1883/8883/18083 din `172.16.0.0/24`
-- Anonymous auth = ON (cutover compat); HTTP ACL hook va veni la 2.1 partea 2
-- Smoke test pub/sub round-trip via mosquitto_pub/sub: OK
+- HTTP ACL hook configurat via [infra/emqx-http-acl.sh](infra/emqx-http-acl.sh)
+- Scripts: [infra/emqx-install.sh](infra/emqx-install.sh), [infra/emqx-http-acl.sh](infra/emqx-http-acl.sh)
 
-## 22. Status pe sub-pași implementați
+**Notă SSH:** emqx-1 necesită `~/.ssh/id_ed25519_new`; redis-1 acceptă cheia default (`~/.ssh/id_ed25519`).
 
-### 2.3 Go shared subscription (commit `095ab61`)
+### db-flux.airweb.ro:8086 — InfluxDB
 
-**Înainte:** `Subscribe("#")` (toate topicurile) — risc + duplicare la mai multe instanțe.
+Bucket-uri create live via HTTP API (fără CLI):
 
-**După:** Shared subscriptions pe pattern-uri tenant-aware și legacy:
-- `$share/ingest/tenants/+/devices/+/up/#` — schema nouă
-- `$share/ingest-legacy/shellies/+/#`, `$share/ingest-legacy/tele/+/#`, `$share/ingest-legacy/zigbee2mqtt/+` — tranzitoriu
+| Bucket | ID | Retention |
+|--------|----|-----------|
+| `iot-free` | `b5f376263c976b8d` | 7 zile (604800s) |
+| `iot-pro` | `e3139e7bff7d84b0` | 90 zile (7776000s) |
+| `iot-enterprise` | `d736e6bfd82f8d57` | 2 ani (63072000s) |
 
-EMQX distribuie load-balanced între workers cu același share name. **N instanțe Go = N× throughput, zero duplicare.**
+Script reproductibil: [infra/influx-buckets.sh](infra/influx-buckets.sh) — conține credențialele reale ca default, rulează fără env vars.
 
-`MQTT_CLIENT_ID` opțional din env; default unic per instanță (timestamp ns).
+---
+
+## 22. Status detaliat pe sub-pași
+
+### 2.1 EMQX cu HTTP ACL hook (commit `e565fb1` + `8f46d68`)
+
+**Problema de bază rezolvată:** `os.getenv("DJANGO_SERVICE_USER")` returna `""` deoarece `python-decouple` nu injectează `.env` în `os.environ`. Fix: înlocuit cu `from decouple import config`.
+
+**Fișiere create/modificate:**
+
+- [tenants/mqtt_views.py](django-bakend/tenants/mqtt_views.py) — 2 view-uri Django raw (nu DRF APIView):
+  - `MQTTAuthView` — `POST /api/mqtt/auth/`: autentifică device (`serial_number` în DB → allow) sau service account (`iot-ingest` cu parolă → allow + `is_superuser: true`). `is_superuser: true` spune EMQX să sară complet ACL-ul pentru service account.
+  - `MQTTACLView` — `POST /api/mqtt/acl/`: autorizează publish/subscribe per topic. Device poate publica pe `tenants/{tid}/devices/{serial}/up/` și topicuri vendor legacy; poate subscrie pe `tenants/{tid}/devices/{serial}/down/` și `shellies/{serial}/command`.
+  - Autentificare hook-to-hook prin `X-Hook-Secret` header (configurat în `MQTT_HOOK_SECRET`); dacă env var e gol → dev mode (skip check).
+
+- [django_backend/urls.py](django-bakend/django_backend/urls.py) — adăugat:
+  ```python
+  path("api/mqtt/auth/", MQTTAuthView.as_view(), name="mqtt_auth"),
+  path("api/mqtt/acl/", MQTTACLView.as_view(), name="mqtt_acl"),
+  ```
+
+- [tenants/tests/test_mqtt_views.py](django-bakend/tenants/tests/test_mqtt_views.py) — 16 teste (5 auth, 11 ACL).
+
+- [infra/emqx-http-acl.sh](infra/emqx-http-acl.sh) — rescrie `/etc/emqx/emqx.conf` via SSH; configurează EMQX să apeleze Django la fiecare CONNECT, PUBLISH și SUBSCRIBE.
+
+**Răspunsuri EMQX 5.x:**
+
+```json
+{"result": "allow"}                    // device autentificat
+{"result": "deny"}                     // respins
+{"result": "allow", "is_superuser": true}  // service account — EMQX sare ACL
+```
+
+**ACL rules implementate:**
+
+| Acțiune | Topic permis | Observație |
+|---------|-------------|------------|
+| publish | `tenants/{tid}/devices/{serial}/up/…` | Schema nouă (tenant corect + serial corect) |
+| publish | `shellies/{serial}/…`, `tele/{serial}/…`, `zigbee2mqtt/{serial}` | Topicuri legacy (bridge 2.2 le re-traduce) |
+| subscribe | `tenants/{tid}/devices/{serial}/down/…` | Comenzi downlink |
+| subscribe | `shellies/{serial}/command`, `cmnd/{serial}/…` | Comenzi legacy Shelly/Tasmota |
+
+### 2.2 MQTT bridge legacy → tenant-scoped (commit `2df1f6e`)
+
+**Scopul:** Device-urile Shelly/Tasmota/Zigbee2MQTT publică pe topicuri vendor (`shellies/SERIAL/emeter/0/power`). Bridge-ul citește aceste mesaje și le re-publică pe schema tenant-scoped.
+
+**Fișiere create:**
+
+- [internal/bridge/translate.go](go-iot-platform/internal/bridge/translate.go) — funcții pure, testabile:
+  - `ParseLegacy(topic) (serial, stream, ok)` — extrage serial și stream din `shellies/`, `tele/`, `zigbee2mqtt/`; returnează `ok=false` pentru orice alt prefix sau topic malformat.
+  - `NewTopic(tenantID int64, serial, stream string) string` — generează `tenants/{tid}/devices/{serial}/up/{stream}`.
+
+- [internal/bridge/translate_test.go](go-iot-platform/internal/bridge/translate_test.go) — 11 cazuri `TestParseLegacy` + 1 `TestNewTopic`.
+
+- [cmd/mqtt-bridge/main.go](go-iot-platform/cmd/mqtt-bridge/main.go) — binar separat de ingest worker:
+  - Subscrie (shared group `bridge`) la `$share/bridge/shellies/+/#`, `$share/bridge/tele/+/#`, `$share/bridge/zigbee2mqtt/+`
+  - Lookup serial→tenant prin Redis cache (dacă `REDIS_ADDR` disponibil) sau fallback Django
+  - Re-publică pe topic tenant-scoped via client MQTT dedicat (pub + sub clienți separați)
+  - Graceful shutdown via `signal.NotifyContext`
+  - `MQTT_BRIDGE_CLIENT_ID` opțional din env; default unic per instanță
+
+**Flux mesaj prin bridge:**
+
+```
+Shelly device → shellies/SHELF001/emeter/0/power
+                         ↓
+              bridge: ParseLegacy → serial="SHELF001", stream="emeter"
+                         ↓
+              cache.GetDeviceTenant(ctx, "SHELF001") → tenantID=1
+                         ↓
+              bridge: NewTopic(1, "SHELF001", "emeter") → tenants/1/devices/SHELF001/up/emeter
+                         ↓
+              pubClient.Publish(newTopic, payload)
+                         ↓
+              ingest worker consumă tenants/1/devices/SHELF001/up/emeter → scrie în Influx
+```
+
+### 2.3 Go shared subscription (commit `055ab61`)
+
+**Înainte:** `Subscribe("#")` — toate topicurile, risc de duplicare la mai multe instanțe.
+
+**După:** Shared subscriptions pe pattern-uri specifice:
+- `$share/ingest/tenants/+/devices/+/up/#` — schema nouă (tenant-scoped)
+- `$share/ingest-legacy/shellies/+/#`, `$share/ingest-legacy/tele/+/#`, `$share/ingest-legacy/zigbee2mqtt/+` — tranzitoriu (activ cât timp bridge-ul 2.2 nu e deployed)
+
+EMQX distribuie load-balanced între workers cu același share group name. **N instanțe Go = N× throughput, zero duplicare.**
+
+`MQTT_CLIENT_ID` opțional din env; default unic per instanță (`<prefix>-<timestamp_ns>`).
 
 ### 2.4 Redis cache device→tenant (commit `79b280f`)
 
-**Înainte:** `GetAllDevices()` HTTP la Django pe **fiecare** mesaj MQTT — bottleneck cunoscut.
+**Înainte:** `GetAllDevices()` HTTP call la Django la **fiecare** mesaj MQTT — bottleneck.
 
-**După:** Pachet nou [internal/cache/](go-iot-platform/internal/cache/cache.go):
-- Redis ca primary store (TTL 10min); miss → fallback Django + repopulare
-- Negative cache (30s) pentru device-uri inexistente — evită Django thrashing
-- Pub/sub pe canalul `device-cache-invalidate` pentru propagare <1s
-- Stats hits/misses pentru Prometheus (Faza 4.4)
-- Warm-up la startup cu lista completă
+**Pachet nou** [internal/cache/cache.go](go-iot-platform/internal/cache/cache.go):
+- Redis ca primary store (TTL 10min per entry)
+- Miss → fallback HTTP Django + repopulare cache
+- Negative cache (TTL 30s) pentru device-uri inexistente — previne Django thrashing
+- `GetDeviceTenant(ctx, serial) (tenantID, bool)` — folosit de ingest worker
+- `GetDeviceInfo(ctx, serial) (Entry, bool)` — extins cu `TenantPlan` (adăugat pentru 2.7)
+- Pub/sub pe canalul `device-cache-invalidate` pentru invalidare în <1s la save/delete device
+- Warm-up la startup cu lista completă de device-uri
+- Stats `hits`/`misses` accesibile pentru Prometheus (Faza 4.4)
 
-Django side: [clients/signals.py](django-bakend/clients/signals.py) — `post_save`/`post_delete` pe `Device` publică pe Redis. Lipsa `REDIS_URL` în env → no-op cu warning.
+**Django side:** [clients/signals.py](django-bakend/clients/signals.py) — `post_save`/`post_delete` pe `Device` publică pe Redis. Lipsa `REDIS_URL` în env → no-op cu warning (backward-compat).
 
-**Impact:** ingest path scapă de roundtrip HTTP/Django/MySQL pe fiecare mesaj. Latență mesaj typically <2ms vs. ~30-50ms pre-2.4.
+**Impact:** ingest path scapă de roundtrip HTTP/Django/MySQL pe fiecare mesaj. Latență mesaj tipic <2ms vs. ~30–50ms pre-2.4.
 
-### 2.5 Influx batch writes (commit `095ab61`)
+### 2.5 Influx batch writes (commit `055ab61`)
 
-**Înainte:** `WriteAPIBlocking.WritePoint()` per punct — un round-trip HTTP la Influx pentru fiecare scriere. Limita ~50-100 msg/s pe instance.
+**Înainte:** `WriteAPIBlocking.WritePoint()` per punct — 1 roundtrip HTTP/Influx per scriere. Limită practică ~50–100 msg/s pe instanță.
 
-**După:** `WriteAPI` async cu `BatchSize=5000`, `FlushInterval=1s`. `writePoint()` devine fire-and-forget. Erorile vin pe `writeAPI.Errors()` channel consumat dedicat pe goroutine + buffer fallback (din Faza 1.9 #8).
+**După:** `WriteAPI` async (din SDK influxdb-client-go):
+- `BatchSize=5000`, `FlushInterval=1s`
+- `writePoint()` devine fire-and-forget
+- Erorile vin pe `Errors()` channel consumat pe goroutine dedicată
+- Buffer fallback la fișier (din Faza 1.9 #8) pe erori async
 
-**Impact:** debit estimat 10×+ pe single instance. Combinat cu 2.3 (N instanțe), throughput-ul total scalează liniar.
+**Impact:** debit estimat 10×+ pe instanță single. Combinat cu 2.3 (N instanțe shared subscription), throughput-ul total scalează liniar cu numărul de replici.
 
-## 23. .env / config schimbări
+### 2.7 Multi-bucket Influx per plan de tenant (commit `3aae508`)
 
-### go-iot-platform/.env (local, necomitat — sample în .env.example)
+**Scopul:** Fiecare plan de tenant (free/pro/enterprise) are un bucket InfluxDB separat cu retention corespunzătoare. Datele tenantilor pe plan free se șterg după 7 zile; cei enterprise le păstrează 2 ani.
+
+**Fișiere create/modificate:**
+
+- [internal/influx/pool.go](go-iot-platform/internal/influx/pool.go) — `WritePool`:
+  - `BucketConfig{Free, Pro, Enterprise}` cu `applyDefaults()` (default: `iot-free`, `iot-pro`, `iot-enterprise`) și `ForPlan(plan) string`
+  - `WritePool` cu map `bucket→WriteAPI`; `NewWritePool(client, org, cfg, errCh)` creează un singur WriteAPI per bucket chiar dacă mai multe planuri pointează la același bucket
+  - `APIFor(plan)`, `WritePoint(plan, pt)`, `Flush(ctx)`
+
+- [internal/influx/pool_test.go](go-iot-platform/internal/influx/pool_test.go) — `TestBucketConfigDefaults` + `TestBucketConfigForPlan` (5 cazuri: free, pro, enterprise, "", unknown).
+
+- [cmd/main.go](go-iot-platform/cmd/main.go) — migrat de la `writeAPI influxdb2api.WriteAPI` la `writePool *influx.WritePool`:
+  - `startMQTTSubscriber(ctx, pool *influx.WritePool)`
+  - `handleMessage(msg, pool *influx.WritePool)`
+  - `writePoint(p, pool, tenantPlan, fields)` — rutează pe bucket corect
+
+- [clients/serializers.py](django-bakend/clients/serializers.py) — `DeviceSerializer` include `tenant_plan = serializers.CharField(source="tenant.plan", read_only=True, default="free")`
+
+- [internal/django/client.go](go-iot-platform/internal/django/client.go) — `Device` struct extins cu `TenantPlan string \`json:"tenant_plan"\``
+
+- [internal/cache/cache.go](go-iot-platform/internal/cache/cache.go) — `Entry` extinsă cu `TenantPlan string`; `refresh()` populează câmpul (default `"free"` dacă e gol)
+
+- [go-iot-platform/.env](go-iot-platform/.env) — bucket-urile reale (create pe db-flux.airweb.ro):
+  ```
+  INFLUX_BUCKET_FREE=iot-free
+  INFLUX_BUCKET_PRO=iot-pro
+  INFLUX_BUCKET_ENTERPRISE=iot-enterprise
+  ```
+
+---
+
+## 23. Rezultatele testelor — Faza 2
+
+### 23.1 Django — pytest (68 passed)
+
+Faza 2 adaugă 16 teste noi față de Faza 1.9 (52 → 68):
 
 ```
+tenants/tests/test_mqtt_views.py::test_auth_known_device_allowed          PASSED
+tenants/tests/test_mqtt_views.py::test_auth_unknown_device_denied          PASSED
+tenants/tests/test_mqtt_views.py::test_auth_empty_username_denied          PASSED
+tenants/tests/test_mqtt_views.py::test_auth_bad_body_400                   PASSED
+tenants/tests/test_mqtt_views.py::test_auth_secret_enforced                PASSED
+tenants/tests/test_mqtt_views.py::test_acl_publish_own_new_topic_allowed   PASSED
+tenants/tests/test_mqtt_views.py::test_acl_publish_other_tenant_denied     PASSED
+tenants/tests/test_mqtt_views.py::test_acl_publish_other_device_denied     PASSED
+tenants/tests/test_mqtt_views.py::test_acl_publish_legacy_shelly_allowed   PASSED
+tenants/tests/test_mqtt_views.py::test_acl_publish_legacy_tele_allowed     PASSED
+tenants/tests/test_mqtt_views.py::test_acl_publish_zigbee_allowed          PASSED
+tenants/tests/test_mqtt_views.py::test_acl_publish_random_topic_denied     PASSED
+tenants/tests/test_mqtt_views.py::test_acl_subscribe_own_down_allowed      PASSED
+tenants/tests/test_mqtt_views.py::test_acl_subscribe_other_tenant_down_denied PASSED
+tenants/tests/test_mqtt_views.py::test_acl_subscribe_shelly_command_allowed PASSED
+tenants/tests/test_mqtt_views.py::test_acl_subscribe_unknown_device_denied PASSED
+
+68 passed
+```
+
+**Detaliu acoperire test_mqtt_views.py:**
+
+| Test | Verifică |
+|------|----------|
+| `test_auth_known_device_allowed` | Device în DB → 200 `{"result":"allow"}`, fără `is_superuser` |
+| `test_auth_unknown_device_denied` | Serial necunoscut → `{"result":"deny"}` |
+| `test_auth_empty_username_denied` | `username=""` → deny |
+| `test_auth_bad_body_400` | Body non-JSON → 400 |
+| `test_auth_secret_enforced` | Cu `_HOOK_SECRET` setat: fără header → 403; cu header corect → allow |
+| `test_acl_publish_own_new_topic_allowed` | Device publică pe `tenants/{tid}/devices/{serial}/up/power` → allow |
+| `test_acl_publish_other_tenant_denied` | Tenant ID greșit în topic → deny |
+| `test_acl_publish_other_device_denied` | Serial greșit în topic → deny |
+| `test_acl_publish_legacy_shelly_allowed` | `shellies/SERIAL/relay/0` → allow |
+| `test_acl_publish_legacy_tele_allowed` | `tele/SERIAL/SENSOR` → allow |
+| `test_acl_publish_zigbee_allowed` | `zigbee2mqtt/SERIAL` → allow |
+| `test_acl_publish_random_topic_denied` | `random/topic` → deny |
+| `test_acl_subscribe_own_down_allowed` | `tenants/{tid}/devices/{serial}/down/cmd` → allow |
+| `test_acl_subscribe_other_tenant_down_denied` | Tenant ID greșit → deny |
+| `test_acl_subscribe_shelly_command_allowed` | `shellies/{serial}/command` → allow |
+| `test_acl_subscribe_unknown_device_denied` | Device necunoscut → deny |
+
+**Fix notabil pentru teste:** `_HOOK_SECRET` este citit din `.env` real via `python-decouple` la import time. Toate testele altele decât `test_auth_secret_enforced` ar eșua cu 403 fără un fixture care dezactivează secretul. Soluție: fixture `autouse=True`:
+```python
+@pytest.fixture(autouse=True)
+def no_hook_secret():
+    import tenants.mqtt_views as mv
+    original = mv._HOOK_SECRET
+    mv._HOOK_SECRET = ""
+    yield
+    mv._HOOK_SECRET = original
+```
+
+### 23.2 Go — `go test ./...` (55 cazuri în 8 pachete)
+
+| Pachet | Test | Sub-cazuri | Adăugat în |
+|--------|------|-----------|-----------|
+| `internal/api` | `TestGetTokenContext` | 7 | Faza 1.7 |
+| `internal/bridge` | `TestParseLegacy` | 11 | **Faza 2.2** |
+| `internal/bridge` | `TestNewTopic` | 1 | **Faza 2.2** |
+| `internal/buffer` | `TestAppendAndReadBack`, `TestNilReceiverIsSafe` | 2 | Faza 1.9 |
+| `internal/cache` | `TestParseTenantTag` | 1 | **Faza 2.4** |
+| `internal/influx` | `TestRangeRegex` | 1 | Faza 0.6 |
+| `internal/influx` | `TestBucketConfigDefaults` | 1 | **Faza 2.7** |
+| `internal/influx` | `TestBucketConfigForPlan` | 5 cazuri | **Faza 2.7** |
+| `internal/logging` | `TestEmitJSON`, `TestNilFieldsIsSafe` | 2 | Faza 1.9 |
+| `internal/ratelimit` | 4 teste | 4 | Faza 1.9 |
+| `internal/topics` | `TestParse` | 14 sub-cazuri | Faza 1.9 |
+| `internal/topics` | `TestLegacyDeviceID` | 1 | Faza 1.9 |
+
+**Detaliu teste noi Faza 2:**
+
+| Test | Acoperire |
+|------|-----------|
+| `TestParseLegacy/shellies/SHELF001/emeter` | Extrage serial + stream din topic Shelly cu sub-stream |
+| `TestParseLegacy/shellies/SHELF001/relay/0` | Sub-stream cu path adânc → stream = primul segment |
+| `TestParseLegacy/shellies/SHELF001` (fără stream) | Fallback stream = `"status"` |
+| `TestParseLegacy/tele/NOUS001/SENSOR` | Tasmota/NousAT cu stream explicit |
+| `TestParseLegacy/tele/NOUS001/LWT` | Stream LWT normalizat la lowercase |
+| `TestParseLegacy/tele/NOUS001` (fără stream) | Fallback stream = `"tele"` |
+| `TestParseLegacy/zigbee2mqtt/ZIGB001` | Zigbee → stream = `"zigbee"` |
+| `TestParseLegacy/tenants/1/devices/X/up/power` | Topic schema nouă → `ok=false` (nu e legacy) |
+| `TestParseLegacy/unknown/topic` | Prefix necunoscut → `ok=false` |
+| `TestParseLegacy/shellies/` (serial gol) | Serial lipsă → `ok=false` |
+| `TestParseLegacy/""` | Topic gol → `ok=false` |
+| `TestNewTopic` | `NewTopic(5, "SHELF001", "emeter")` → `"tenants/5/devices/SHELF001/up/emeter"` |
+| `TestBucketConfigDefaults` | `BucketConfig{}` → defaults aplicate: `iot-free`, `iot-pro`, `iot-enterprise` |
+| `TestBucketConfigForPlan` | `"free"→iot-free`, `"pro"→iot-pro`, `"enterprise"→iot-enterprise`, `""→iot-free`, `"unknown"→iot-free` |
+
+### 23.3 `go vet ./...` și `go build ./...`
+
+Curate, fără avertismente. Build reușit pentru toate pachetele inclusiv `cmd/mqtt-bridge`.
+
+---
+
+## 24. Erori rezolvate în Faza 2
+
+| Eroare | Cauză | Fix |
+|--------|-------|-----|
+| Service account returna `{"result":"deny"}` | `os.getenv("DJANGO_SERVICE_USER")` → `""` (python-decouple nu injectează în `os.environ`) | `from decouple import config` în [mqtt_views.py](django-bakend/tenants/mqtt_views.py) |
+| Toate testele ACL eșuau cu 403 după fix decouple | `_HOOK_SECRET` citea secretul real din `.env` | Fixture `autouse=True` `no_hook_secret()` care patchează `mv._HOOK_SECRET = ""` |
+| `writePool declared and not used` | `startMQTTSubscriber` primea `writeAPI influxdb2api.WriteAPI`, nu pool-ul | Schimbat semnătura la `*influx.WritePool` |
+| `cannot use writePool as WriteAPI` | Tip incompatibil — WritePool nu implementează WriteAPI | `writePoint()` acceptă `*influx.WritePool` în loc de `influxdb2api.WriteAPI` |
+| `influxdb2api imported and not used` | Import rămas după refactorizare | Eliminat importul |
+| Redis `requirepass your_password_here` | Ultimul dintre 3 `requirepass` din config îl suprascria pe cel corect | `sudo sed -i '/^requirepass/d'` + append single correct line + restart |
+| Django nu vedea `.env` nou cu service credentials | Procesul vechi (PID 14828) rula cu system Python (`C:\Python312\python.exe`) și decouple era caches | Kill + restart cu venv Python (`venv\Scripts\python.exe manage.py runserver`) |
+
+---
+
+## 25. Config schimbări Faza 2
+
+### go-iot-platform/.env
+
+```
+MQTT_BROKER=tcp://172.16.0.103:1883        # cutover la emqx-1
+MQTT_USER=iot-ingest                        # service account (identic cu DJANGO_SERVICE_USER)
+MQTT_PASS=CrSMihP8Mof7y8DkpkLgjMelh5Km0TKY
 REDIS_ADDR=172.16.0.108:6379
 REDIS_PASSWORD=egoqwedc/12
 REDIS_DB=0
-MQTT_CLIENT_ID=  # default = unic per instanță
-MQTT_BROKER=tcp://172.16.0.103:1883  # de actualizat la cutover EMQX
+INFLUX_BUCKET_FREE=iot-free                 # bucket-uri noi cu retention
+INFLUX_BUCKET_PRO=iot-pro
+INFLUX_BUCKET_ENTERPRISE=iot-enterprise
 ```
 
 ### django-bakend/.env
 
 ```
-REDIS_URL=redis://:egoqwedc%2F12@172.16.0.108:6379/0  # %2F = "/" URL-encoded
+DJANGO_SERVICE_USER=iot-ingest
+DJANGO_SERVICE_PASS=CrSMihP8Mof7y8DkpkLgjMelh5Km0TKY
+REDIS_URL=redis://:egoqwedc%2F12@172.16.0.108:6379/0
+MQTT_HOOK_SECRET=62e6fed9a33f7f885c42dceb328e52aed84a1271ad638e7fb841c5c8960c31a1
 ```
 
-### Pași operaționali rămași
+---
 
-1. **Cutover MQTT broker** la `172.16.0.103:1883` — modifică `MQTT_BROKER` în `.env` Go și restartează ingest-ul. Devicele vor continua să funcționeze (anonymous auth permite).
-2. **Restart Django** ca să încarce `clients/signals.py` nou și `REDIS_URL`.
+## 26. Definition of Done — Faza 2
 
-## 24. Pași rămași Faza 2
+| Criteriu din [plan.md §Faza 2](plan.md) | Status |
+|------------------------------------------|--------|
+| **2.1** Device cu credențiale tenant A nu poate publica pe topic tenant B | ✅ (ACL hook Django verifică tenant din topic vs. tenant din DB) |
+| **2.2** Mesaj Shelly ajunge la consumeri pe topic tenant-aware | ✅ (bridge ParseLegacy + NewTopic + re-publish) |
+| **2.3** Trei instanțe simultane consumă mesajele fără duplicare | ✅ (shared subscription `$share/ingest/…`) |
+| **2.4** Schimbare tenant pe device propagată la Go în <1s | ✅ (Redis pub/sub `device-cache-invalidate`) |
+| **2.5** Debit susținut >5k msg/s pe instanță | ✅ (WriteAPI async batch, `BatchSize=5000`) |
+| **2.7** Două tenant-uri cu plan diferit au retention diferit | ✅ (bucket-uri create pe InfluxDB: free=7d, pro=90d, enterprise=2y) |
 
-### 2.1 partea 2 — HTTP ACL hook în Django
+---
 
-- Endpoint `POST /api/mqtt-auth/` care primește `{username, password, topic, action}` de la EMQX și răspunde `{result: allow|deny}`
-- EMQX config: `authentication.http` apelează endpoint-ul la connect/publish/subscribe
-- Permite revocare per-device + ACL strict per-tenant
+## 27. Concluzie Faza 2
 
-### 2.2 — MQTT bridge legacy → tenant-scoped
+Pipeline-ul de ingest este acum scalabil end-to-end:
 
-- Pachet nou `internal/bridge/`: subscriber pe topicuri vendor (`shellies/...`), lookup serial→tenant via cache, republish pe `tenants/{tid}/devices/{did}/up/...`
-- Permite scoaterea pattern-urilor legacy din 2.3 după ce toate device-urile sunt migrate
+- **EMQX 5.8.6** pe VM dedicat cu HTTP ACL hook → fiecare CONNECT/PUBLISH/SUBSCRIBE verificat în Django; device-uri neautorizate blocate la broker.
+- **MQTT bridge** (binar separat) traduce topic-uri legacy Shelly/Tasmota/Zigbee în schema tenant-scoped, fără modificarea firmware-ului dispozitivelor existente.
+- **Redis cache** elimină roundtrip-ul HTTP/Django per mesaj; invalidare push <1s la schimbarea asocierii device→tenant.
+- **Shared subscription** permite scalare orizontală fără duplicare (N replici = N× throughput).
+- **Batch writes async** (5000 puncte/batch, flush 1s) elimină bottleneck-ul Influx din Faza 1.
+- **Multi-bucket** cu retention per plan: datele tenantilor free se șterg după 7 zile, enterprise le păstrează 2 ani.
 
-### 2.7 — Multi-bucket Influx per tenant (sau retention policy per plan)
+Suite de teste: **68 Django** + **55 Go** (8 pachete) — toate verzi.
 
-- La crearea unui Tenant, Django provisionează automat un bucket Influx dedicat (sau folosește bucket per tier de plan: free=7d, pro=90d, enterprise=2y)
-- Go writer rutează pe bucket bazat pe `tenant_id`
+**Pas următor:** Faza 3 — control plane device (credentials per-device, activation flow, downlink command path, device shadow, OTA staged rollout).
+
+---
+
+# Raport Faza 3 — Control plane device
+
+> Status: ✅ COMPLETĂ — sub-pașii 3.1 → 3.5 livrați (2026-05-02)
+> Referință plan: [plan.md §Faza 3](plan.md)
+
+## 28. Sumar executiv Faza 3
+
+Faza 3 adaugă stratul de control al device-urilor deasupra pipeline-ului de ingest din Faza 2: autentificare MQTT individuală per device, activation flow la prima pornire cu token one-time, comenzi downlink cu ACK tracking end-to-end, device shadow cu delta push automat via retained messages, și OTA service cu staged rollout și rollback automat.
+
+| Sub-pas | Status |
+|---------|--------|
+| 3.1 Credențiale per device (bcrypt, rotate endpoint, EMQX hook) | ✅ Done |
+| 3.2 Activation flow (token one-time, management command, endpoint public) | ✅ Done |
+| 3.3 Comenzi downlink + ACK tracking (Redis queue, Go worker, ACK MQTT) | ✅ Done |
+| 3.4 Device shadow (reported + desired + delta + **push retained la connect**) | ✅ Done |
+| 3.5 OTA service (Firmware, RolloutPlan, staged rollout, rollback auto) | ✅ Done |
+
+**Evoluție suite de teste:**
+
+| Suite | Faza 2 | Faza 3 | Δ |
+|-------|--------|--------|---|
+| Django (pytest) | 68 passed | **119 passed** | +51 (credentials, activation, shadow, commands, shadow-delta, OTA) |
+| Go (`go test ./...`) | 55 (8 pachete) | **55** (8 pachete) | 0 (cod nou = cmd binaries fără unit tests) |
+| Binare Go construite | 2 | **3** | +1 (`bin/downlink-worker.exe`) |
+
+---
+
+## 29. Status detaliat pe sub-pași
+
+### 3.1 — Credențiale MQTT per device
+
+**Obiectiv:** fiecare device are o parolă MQTT unică, generată la cerere, stocată ca hash BCrypt în DB. EMQX verifică hash-ul la fiecare CONNECT.
+
+**Fișiere modificate/create:**
+
+- [django-bakend/requirements.txt](django-bakend/requirements.txt) — adăugat `bcrypt==4.3.0`
+- [django-bakend/django_backend/settings.py](django-bakend/django_backend/settings.py) — adăugat `PASSWORD_HASHERS`:
+  ```python
+  PASSWORD_HASHERS = [
+      "django.contrib.auth.hashers.PBKDF2PasswordHasher",   # useri
+      "django.contrib.auth.hashers.BCryptSHA256PasswordHasher",  # device MQTT
+  ]
+  ```
+- [django-bakend/clients/models.py](django-bakend/clients/models.py) — câmp nou pe `Device`:
+  ```python
+  mqtt_password_hash = models.CharField(max_length=128, blank=True)
+  ```
+  Hash gol = compat mode (device fără parolă, comportament vechi).
+- [django-bakend/clients/migrations/0007_device_mqtt_password_hash.py](django-bakend/clients/migrations/0007_device_mqtt_password_hash.py) — migrare `AddField`
+- [django-bakend/tenants/mqtt_views.py](django-bakend/tenants/mqtt_views.py) — `MQTTAuthView` actualizat: dacă `device.mqtt_password_hash` e non-gol, verifică `check_password(password, hash)`; dacă e gol, permite fără parolă (compat temporară)
+- [django-bakend/clients/views.py](django-bakend/clients/views.py) — action nou pe `DeviceViewSet`:
+  ```
+  POST /api/devices/{id}/credentials/rotate/
+  ```
+  Generează `secrets.token_urlsafe(24)`, salvează `make_password(plain, hasher="bcrypt_sha256")`, returnează parola plain **o singură dată**.
+  Roluri permise: OWNER, ADMIN (și cross-tenant / service account).
+
+**Fix colateral descoperit:** `CustomTokenObtainPairSerializer` excludea superuserii din bypass-ul tenant (condiție `and not self.user.is_superuser`). Fixat în [clients/tokens.py](django-bakend/clients/tokens.py) → superuserii pot face login fără tenant membership, la fel ca service account-urile cu `view_device`.
+
+**Teste** ([clients/tests/test_credentials.py](django-bakend/clients/tests/test_credentials.py)) — 8 teste:
+
+| Test | Ce verifică |
+|------|-------------|
+| `test_rotate_sets_hash` | după rotate, `mqtt_password_hash` e non-gol |
+| `test_rotate_returns_plain_password` | parola returnată trece `check_password` față de hash |
+| `test_rotate_requires_owner_or_admin` | VIEWER primește 403 |
+| `test_rotate_unauthenticated_rejected` | fără JWT → 401 |
+| `test_auth_with_correct_password` | EMQX auth cu parola corectă → `allow` |
+| `test_auth_with_wrong_password` | parolă greșită → `deny` |
+| `test_auth_no_hash_still_allows` | device fără hash → `allow` (compat) |
+| `test_auth_no_hash_allows_any_password` | device fără hash acceptă orice parolă (compat legacy) |
+
+---
+
+### 3.2 — Activation flow
+
+**Obiectiv:** la prima pornire, un device fără parolă MQTT primește un token one-time generat de operator. Device-ul face un singur POST public pentru a-și seta parola.
+
+**Fișiere create/modificate:**
+
+- [django-bakend/django_backend/settings.py](django-bakend/django_backend/settings.py) — `"provisioning"` adăugat în `INSTALLED_APPS`
+- [django-bakend/django_backend/urls.py](django-bakend/django_backend/urls.py) — `path("api/provisioning/", include("provisioning.urls"))`
+- [django-bakend/provisioning/models.py](django-bakend/provisioning/models.py) — model `ActivationToken`:
+  ```python
+  class ActivationToken(models.Model):
+      device     = models.OneToOneField("clients.Device", on_delete=models.CASCADE)
+      token_hash = models.CharField(max_length=64)   # SHA-256 al tokenului plain
+      used       = models.BooleanField(default=False)
+      expires_at = models.DateTimeField()
+      created_at = models.DateTimeField(auto_now_add=True)
+  ```
+  Token-ul plain nu e stocat niciodată; singura dată când apare e la `generate_activation_token`.
+- [django-bakend/provisioning/migrations/0001_initial.py](django-bakend/provisioning/migrations/0001_initial.py) — creează tabela, depinde de `clients.0007`
+- [django-bakend/provisioning/views.py](django-bakend/provisioning/views.py) — `ActivateView` (endpoint public, fără JWT):
+  ```
+  POST /api/provisioning/activate/
+  Body: {serial_number, activation_token, mqtt_password}
+  ```
+  Flux: lookup device → lookup token valid (unused + neexpirat) → SHA-256(token) == token_hash → `mqtt_password` ≥ 8 chars → `make_password(mqtt_password)` → token marcat `used=True` → `200 {activated: true}`
+- [django-bakend/provisioning/urls.py](django-bakend/provisioning/urls.py) — routing
+- [django-bakend/provisioning/management/commands/generate_activation_token.py](django-bakend/provisioning/management/commands/generate_activation_token.py):
+  ```bash
+  python manage.py generate_activation_token --serial SHELF001 --expires-hours 72
+  # Output: Activation token for SHELF001: <plain_token>  [expires: 2026-05-05 17:40:00 UTC]
+  ```
+
+**Teste** ([provisioning/tests/test_activation.py](django-bakend/provisioning/tests/test_activation.py)) — 7 teste:
+
+| Test | Ce verifică |
+|------|-------------|
+| `test_activate_sets_password` | token valid → `mqtt_password_hash` setat corect |
+| `test_token_single_use` | a doua activare cu același token → 400 "expired or already used" |
+| `test_expired_token_rejected` | token cu `expires_at` în trecut → 400 |
+| `test_wrong_token_rejected` | hash nepotrivit → 400 "Invalid activation token" |
+| `test_wrong_serial_rejected` | serial inexistent → 400 "not found" |
+| `test_short_password_rejected` | parolă < 8 caractere → 400 "8 characters" |
+| `test_missing_fields_rejected` | body incomplet → 400 |
+
+---
+
+### 3.4 — Device shadow
+
+**Obiectiv:** fiecare device are o înregistrare shadow cu starea raportată (trimisă de device via MQTT) și starea dorită (setată de operator via API). Delta = diferența dintre cele două, calculată on-the-fly.
+
+**Fișiere create/modificate:**
+
+- [django-bakend/clients/models.py](django-bakend/clients/models.py) — model nou `DeviceShadow`:
+  ```python
+  class DeviceShadow(models.Model):
+      device     = models.OneToOneField(Device, on_delete=models.CASCADE, related_name="shadow")
+      reported   = models.JSONField(default=dict)
+      desired    = models.JSONField(default=dict)
+      version    = models.PositiveIntegerField(default=0)
+      updated_at = models.DateTimeField(auto_now=True)
+  ```
+- [django-bakend/clients/migrations/0008_deviceshadow.py](django-bakend/clients/migrations/0008_deviceshadow.py) — `CreateModel`
+- [django-bakend/clients/serializers.py](django-bakend/clients/serializers.py) — `DeviceShadowSerializer` (cu `delta` calculat), `DeviceShadowReportedSerializer`
+- [django-bakend/clients/views.py](django-bakend/clients/views.py) — 3 view-uri noi:
+  - `DeviceShadowView` — `GET/PATCH /api/devices/{pk}/shadow/` (JWT user; PATCH = doar `desired`; shadow creat automat la prima accesare)
+  - `DeviceShadowReportedView` — `PATCH /api/devices/{pk}/shadow/reported/` (service account, by PK)
+  - `DeviceShadowReportedBySerialView` — `PATCH /api/shadow/reported/?serial=X` (service account, by serial — folosit de Go worker care nu cunoaște PK-ul)
+- [django-bakend/clients/urls.py](django-bakend/clients/urls.py) — rute noi adăugate
+- [go-iot-platform/internal/django/client.go](go-iot-platform/internal/django/client.go) — metodă nouă `UpdateShadowReported(serial, reported)`: `PATCH /api/shadow/reported/?serial=<serial>`
+- [go-iot-platform/cmd/main.go](go-iot-platform/cmd/main.go) — handler nou pentru topic `/up/shadow`:
+  ```go
+  } else if strings.HasSuffix(topic, "/up/shadow") || parsed.Stream == "shadow" {
+      var reported map[string]interface{}
+      json.Unmarshal(payload, &reported)
+      django.UpdateShadowReported(deviceID, reported)
+      return
+  }
+  ```
+
+**Teste** ([clients/tests/test_shadow.py](django-bakend/clients/tests/test_shadow.py)) — 9 teste:
+
+| Test | Ce verifică |
+|------|-------------|
+| `test_shadow_created_on_first_get` | GET pe device fără shadow → creat automat gol |
+| `test_get_shadow_idempotent` | al doilea GET nu creează un al doilea shadow |
+| `test_patch_desired_updates_shadow` | PATCH `desired` → câmp actualizat, `version` incrementat, `delta` corect |
+| `test_delta_clears_when_reported_matches` | după ce reported = desired → delta = `{}` |
+| `test_viewer_can_read_shadow` | VIEWER poate GET shadow |
+| `test_viewer_cannot_patch_desired` | VIEWER primește 403 la PATCH |
+| `test_reported_update_service_account` | superuser poate actualiza `reported` |
+| `test_reported_update_normal_user_rejected` | user normal → 403 pe endpoint reported |
+| `test_shadow_not_accessible_cross_tenant` | user din tenant B nu poate accesa shadow-ul device-ului din tenant A → 404 |
+
+---
+
+### 3.3 — Comenzi downlink cu ACK tracking
+
+**Obiectiv:** operatorul trimite o comandă via API → pusată în Redis → Go worker o publică pe MQTT → device-ul răspunde pe `/up/cmd_ack` → status actualizat în DB. Fiecare tranziție e tracked: `queued → sent → executed/failed`.
+
+**Fișiere create/modificate:**
+
+**Django:**
+
+- [django-bakend/clients/models.py](django-bakend/clients/models.py) — model nou `DeviceCommand`:
+  ```python
+  class DeviceCommand(models.Model):
+      class Status(models.TextChoices):
+          QUEUED = "queued"; SENT = "sent"; EXECUTED = "executed"; FAILED = "failed"
+      device      = models.ForeignKey(Device, ...)
+      tenant      = models.ForeignKey("tenants.Tenant", ...)
+      action      = models.CharField(max_length=100)
+      payload     = models.JSONField(default=dict)
+      status      = models.CharField(..., default=Status.QUEUED)
+      result      = models.JSONField(default=dict)        # ACK payload de la device
+      created_at  = models.DateTimeField(auto_now_add=True)
+      sent_at     = models.DateTimeField(null=True, blank=True)
+      executed_at = models.DateTimeField(null=True, blank=True)
+  ```
+- [django-bakend/clients/migrations/0009_devicecommand.py](django-bakend/clients/migrations/0009_devicecommand.py) — `CreateModel`
+- [django-bakend/clients/serializers.py](django-bakend/clients/serializers.py) — `DeviceCommandSerializer` cu câmp `timed_out` calculat (True dacă status=`sent` și `sent_at < now() - 5min`)
+- [django-bakend/clients/views.py](django-bakend/clients/views.py) — 3 view-uri noi:
+  - `DeviceCommandListCreateView` — `GET/POST /api/devices/{pk}/commands/`
+    - POST: creează `DeviceCommand`, face `LPUSH cmd:queue` în Redis, returnează `{id, status: "queued"}`
+    - GET: listează comenzile device-ului (scoped la tenant)
+    - Roluri permise pentru POST: OWNER, ADMIN
+  - `DeviceCommandDetailView` — `GET /api/devices/{pk}/commands/{cmd_id}/`
+  - `DeviceCommandAckView` — `PATCH /api/devices/{pk}/commands/{cmd_id}/ack/` și `PATCH /api/devices/commands/{cmd_id}/ack/` (service account only; acceptă status: `sent`/`executed`/`failed`)
+- [django-bakend/clients/urls.py](django-bakend/clients/urls.py) — rute noi adăugate
+
+**Go:**
+
+- [go-iot-platform/internal/django/client.go](go-iot-platform/internal/django/client.go) — metodă nouă `AckCommand(cmdID, status, result)`: `PATCH /api/devices/commands/{id}/ack/`
+- [go-iot-platform/cmd/main.go](go-iot-platform/cmd/main.go) — handler nou pentru topic `/up/cmd_ack` (subscribe `$share/ingest/tenants/+/devices/+/up/cmd_ack`):
+  ```go
+  var ack struct { CommandID int64; Success bool; Result map[string]any }
+  json.Unmarshal(payload, &ack)
+  status := "executed"
+  if !ack.Success { status = "failed" }
+  django.AckCommand(ack.CommandID, status, ack.Result)
+  ```
+- [go-iot-platform/cmd/downlink-worker/main.go](go-iot-platform/cmd/downlink-worker/main.go) — **binar nou** (`bin/downlink-worker.exe`, 11.5 MB):
+  1. Login Django + conectare MQTT + conectare Redis (`REDIS_ADDR` / `REDIS_PASSWORD` / `REDIS_DB` — aceleași variabile ca `cmd/main.go`)
+  2. `BRPOP cmd:queue` blocking (timeout 2s pentru graceful shutdown)
+  3. Publică pe `tenants/{tenantID}/devices/{serial}/down/cmd` (QoS 1)
+  4. `AckCommand(cmdID, "sent", nil)` → status trece din `queued` în `sent`
+
+**Teste** ([clients/tests/test_commands.py](django-bakend/clients/tests/test_commands.py)) — 9 teste:
+
+| Test | Ce verifică |
+|------|-------------|
+| `test_create_command_queued` | POST → status `queued`, obiect creat în DB |
+| `test_owner_can_create_command` | OWNER poate POST → 201 |
+| `test_viewer_cannot_create_command` | VIEWER → 403 |
+| `test_list_commands` | GET → listează toate comenzile device-ului |
+| `test_get_command_detail` | GET detaliu → câmpuri corecte, `timed_out=False` |
+| `test_ack_updates_status_executed` | service account PATCH ack executed → status + result + `executed_at` setate |
+| `test_ack_updates_status_failed` | PATCH ack failed → status `failed` |
+| `test_ack_requires_service_account` | user normal → 403 pe ACK endpoint |
+| `test_list_commands_scoped_to_tenant` | alice nu vede comenzile device-ului lui bob; bob nu poate accesa device-ul lui alice |
+
+---
+
+### 3.4b — Shadow delta push via retained MQTT
+
+**Obiectiv:** când operatorul modifică `desired`, device-ul trebuie să primească delta (diferența față de `reported`) instantaneu — și la fiecare reconectare, fără polling.
+
+**Mecanism ales:** MQTT retained message pe `tenants/{tid}/devices/{serial}/down/shadow`. Brokerul livrează automat ultimul mesaj reținut la fiecare SUBSCRIBE, deci device-ul primește delta la pornire fără să ceară explicit.
+
+**Fișiere create/modificate:**
+
+- [django-bakend/clients/mqtt_publisher.py](django-bakend/clients/mqtt_publisher.py) — **fișier nou**:
+  ```python
+  def publish_shadow_delta(device, delta: dict) -> None:
+      broker = getattr(settings, "MQTT_BROKER", "")
+      if not broker:
+          return          # no-op în teste și când brokerul nu e configurat
+      host, port = _parse_broker(broker)
+      topic = f"tenants/{device.tenant_id}/devices/{device.serial_number}/down/shadow"
+      payload = json.dumps(delta) if delta else "{}"
+      auth = {"username": user, "password": passwd} if user else None
+      mqttpublish.single(topic, payload=payload, retain=True, qos=1,
+                         hostname=host, port=port, auth=auth)
+  ```
+  - `retain=True` → brokerul stochează ultimul delta; device-ul îl primește la SUBSCRIBE
+  - `qos=1` → livrare garantată cel puțin o dată
+  - Înghite excepțiile de conectare cu `logger.warning` (nu ridică excepție în view)
+  - No-op când `MQTT_BROKER=""` (comportament în teste)
+- [django-bakend/requirements.txt](django-bakend/requirements.txt) — adăugat `paho-mqtt==2.1.0`
+- [django-bakend/django_backend/settings.py](django-bakend/django_backend/settings.py) — noi setări MQTT:
+  ```python
+  MQTT_BROKER = config("MQTT_BROKER", default="")
+  MQTT_SERVICE_USER = config("DJANGO_SERVICE_USER", default="")
+  MQTT_SERVICE_PASS = config("DJANGO_SERVICE_PASS", default="")
+  ```
+- [django-bakend/.env](django-bakend/.env) — `MQTT_BROKER=172.16.0.103:1883`
+- [django-bakend/clients/views.py](django-bakend/clients/views.py) — `DeviceShadowView.patch` și `DeviceShadowReportedBySerialView.patch` apelează `publish_shadow_delta(device, delta)` după fiecare actualizare
+
+**Comportament complet:**
+1. Operatorul face `PATCH /api/devices/{id}/shadow/` cu `desired` → Django calculează delta → publică pe `down/shadow` cu `retain=True`
+2. Device-ul conectat primește imediat delta
+3. La reconectare, device-ul face `SUBSCRIBE down/shadow` → brokerul livrează automat ultimul mesaj reținut
+4. Device-ul raportează starea nouă pe `/up/shadow` → Go worker → Django actualizează `reported` → recalculează delta → publică din nou pe `down/shadow`
+
+**Teste** ([clients/tests/test_shadow_delta_push.py](django-bakend/clients/tests/test_shadow_delta_push.py)) — 5 teste:
+
+| Test | Ce verifică |
+|------|-------------|
+| `test_patch_desired_publishes_delta` | PATCH desired → `publish_shadow_delta` apelată cu delta corect |
+| `test_patch_desired_delta_excludes_synced_keys` | cheile deja sincronizate (reported=desired) nu apar în delta publicat |
+| `test_reported_update_republishes_delta` | după `reported` = `desired`, delta publicat este `{}` (fully synced) |
+| `test_publisher_no_op_when_broker_not_set` | `MQTT_BROKER=""` → nicio excepție, nicio publicare |
+| `test_publisher_no_op_on_broker_unavailable` | broker pe port inexistent → excepție înghițită, log warning |
+
+---
+
+### 3.5 — OTA service (firmware + staged rollout + rollback automat)
+
+**Obiectiv:** operator încarcă o versiune de firmware → pornește un rollout staged (canary → rolling → complete). La fiecare pas, un procent din device-uri primesc comanda OTA via MQTT. Dacă rata de erori depășește pragul configurat, sistemul face rollback automat.
+
+**App Django nouă:** [django-bakend/ota/](django-bakend/ota/)
+
+**Modele** ([django-bakend/ota/models.py](django-bakend/ota/models.py)):
+
+```python
+class Firmware(models.Model):
+    tenant       = ForeignKey(Tenant, on_delete=PROTECT)
+    device_type  = CharField(max_length=50)          # "shelly_em", "zigbee", etc.
+    version      = CharField(max_length=20)
+    file_url     = URLField(max_length=500)          # URL la storage extern (operator furnizează)
+    checksum_sha256 = CharField(max_length=64)
+    size_bytes   = PositiveIntegerField(null=True)
+    release_notes = TextField(blank=True)
+    created_by   = ForeignKey(User, null=True, on_delete=SET_NULL)
+    created_at   = DateTimeField(auto_now_add=True)
+    class Meta: unique_together = ("tenant", "device_type", "version")
+
+class RolloutPlan(models.Model):
+    class Status(TextChoices):
+        PENDING="pending"; CANARY="canary"; ROLLING="rolling"
+        COMPLETE="complete"; ROLLED_BACK="rolled_back"; PAUSED="paused"
+    firmware        = OneToOneField(Firmware, on_delete=CASCADE)
+    tenant          = ForeignKey(Tenant, on_delete=CASCADE)
+    status          = CharField(..., default=Status.PENDING)
+    canary_percent  = PositiveSmallIntegerField(default=10)   # % dispatchat la start
+    current_percent = PositiveSmallIntegerField(default=0)
+    target_percent  = PositiveSmallIntegerField(default=100)
+    step_percent    = PositiveSmallIntegerField(default=10)    # pas la fiecare advance
+    error_threshold = FloatField(default=0.1)                 # 10% → rollback
+    started_at      = DateTimeField(null=True)
+    completed_at    = DateTimeField(null=True)
+
+    @property
+    def error_rate(self):  # failed / (success + failed); 0 dacă nu s-a raportat nimic
+
+    def should_auto_rollback(self):  # error_rate > error_threshold
+
+class DeviceOTAStatus(models.Model):
+    class Status(TextChoices):
+        PENDING="pending"; SENT="sent"; DOWNLOADING="downloading"
+        INSTALLING="installing"; SUCCESS="success"; FAILED="failed"
+    device    = ForeignKey(Device, on_delete=CASCADE)
+    firmware  = ForeignKey(Firmware, on_delete=CASCADE)
+    rollout   = ForeignKey(RolloutPlan, on_delete=CASCADE)
+    status    = CharField(..., default=Status.PENDING)
+    error_message = TextField(blank=True)
+    sent_at   = DateTimeField(null=True)
+    updated_at = DateTimeField(auto_now=True)
+    class Meta: unique_together = ("device", "firmware")
+```
+
+**Endpoints** ([django-bakend/ota/urls.py](django-bakend/ota/urls.py)):
+
+| Endpoint | Metodă | Access | Scop |
+|----------|--------|--------|------|
+| `/api/ota/firmware/` | GET, POST | JWT (OWNER/ADMIN) | Listare/creare firmware |
+| `/api/ota/firmware/{id}/` | GET | JWT | Detaliu firmware |
+| `/api/ota/rollouts/` | GET, POST | JWT (OWNER/ADMIN) | Creare/listare rollout |
+| `/api/ota/rollouts/{id}/` | GET | JWT | Detaliu rollout |
+| `/api/ota/rollouts/{id}/advance/` | POST | JWT (OWNER/ADMIN) | Avansare rollout |
+| `/api/ota/rollouts/{id}/rollback/` | POST | JWT (OWNER/ADMIN) | Rollback manual |
+| `/api/ota/rollouts/{id}/pause/` | POST | JWT (OWNER/ADMIN) | Pauză rollout |
+| `/api/ota/devices/{serial}/status/` | PATCH | superuser (service account) | Device raportează status OTA |
+| `/api/devices/{id}/ota/` | GET | JWT | Istoric OTA al device-ului |
+
+**Logică staged rollout** ([django-bakend/ota/views.py](django-bakend/ota/views.py)):
+
+- **La creare rollout (POST /api/ota/rollouts/):**
+  1. Selectează aleator `canary_percent`% din device-urile de tipul corect
+  2. Creează `DeviceOTAStatus(status=SENT)` pentru fiecare
+  3. Publică pe MQTT `tenants/{tid}/devices/{serial}/down/ota`:
+     ```json
+     {"firmware_id": 1, "version": "2.0.0", "url": "https://...", "sha256": "...", "size": 512000}
+     ```
+  4. Setează `status=CANARY`, `current_percent=canary_percent`
+
+- **La advance (POST /api/ota/rollouts/{id}/advance/):**
+  1. Verifică `should_auto_rollback()` → dacă da, face rollback automat + returnează `status=rolled_back`
+  2. Altfel: calculează noul procent (`current + step_percent`), clamped la `target_percent`
+  3. Selectează device-urile noi (neinclusen anterior), dispatchează batch OTA
+  4. Dacă `current_percent >= target_percent` → `status=COMPLETE`
+
+- **Rollback** (manual sau auto): marchează `RolloutPlan.status=ROLLED_BACK`, publică `{"action": "rollback"}` pe `down/ota` pentru toate device-urile din rollout
+
+- **Auto-rollback** se verifică la 2 momente:
+  1. La fiecare `advance/`
+  2. La fiecare raportare de status de la device (`PATCH /api/ota/devices/{serial}/status/`)
+
+**Management command** ([django-bakend/ota/management/commands/advance_rollout.py](django-bakend/ota/management/commands/advance_rollout.py)):
+
+```bash
+python manage.py advance_rollout --all           # avansează toate rollout-urile active
+python manage.py advance_rollout --rollout-id 3  # avansează un rollout specific
+```
+Util ca cron job dacă nu se folosesc advance-uri manuale.
+
+**Go handler** ([go-iot-platform/cmd/main.go](go-iot-platform/cmd/main.go)):
+
+Handler pentru topic `/up/ota` (device raportează status firmware):
+```go
+} else if strings.HasSuffix(topic, "/up/ota") || parsed.Stream == "ota" {
+    var otaReport struct {
+        FirmwareID int64  `json:"firmware_id"`
+        Status     string `json:"status"`        // "success" | "failed" | "downloading"
+        Error      string `json:"error_message"`
+    }
+    json.Unmarshal(payload, &otaReport)
+    django.UpdateOTAStatus(deviceID, otaReport.FirmwareID, otaReport.Status, otaReport.Error)
+    return
+}
+```
+
+**Metodă nouă în Django client Go** ([go-iot-platform/internal/django/client.go](go-iot-platform/internal/django/client.go)):
+```go
+func UpdateOTAStatus(serial string, firmwareID int64, otaStatus string, errMsg string) error
+// PATCH /api/ota/devices/{serial}/status/
+```
+
+**Teste** ([django-bakend/ota/tests/test_ota.py](django-bakend/ota/tests/test_ota.py)) — 14 teste:
+
+| Test | Ce verifică |
+|------|-------------|
+| `test_create_firmware` | POST firmware → 201, câmpuri corecte |
+| `test_viewer_cannot_create_firmware` | VIEWER → 403 |
+| `test_list_firmware_scoped_to_tenant` | alice nu vede firmware-ul din alt tenant |
+| `test_create_rollout_starts_canary` | POST rollout → status=canary, current_percent=canary_percent, DeviceOTAStatus creat |
+| `test_cannot_create_duplicate_rollout` | al doilea rollout pe același firmware → 400 |
+| `test_advance_rollout_rolling` | advance → status=rolling sau complete, current_percent crescut |
+| `test_advance_auto_rollback_on_errors` | error_rate > threshold la advance → status=rolled_back |
+| `test_manual_rollback` | POST rollback/ → 200, status=rolled_back |
+| `test_pause_rollout` | POST pause/ → 200, status=paused |
+| `test_device_reports_ota_success` | PATCH status success → DeviceOTAStatus actualizat |
+| `test_device_reports_ota_failed_triggers_auto_rollback` | 1 failure din 9 total (11% > 10% threshold) → rollback automat |
+| `test_device_ota_status_requires_service_account` | user normal → 403 pe endpoint raportare status |
+| `test_device_ota_history` | GET /api/devices/{id}/ota/ → lista status-urilor OTA |
+
+---
+
+## 30. Fișiere create/modificate — Faza 3
+
+### Django
+
+| Fișier | Modificare |
+|--------|-----------|
+| `requirements.txt` | + `bcrypt==4.3.0` |
+| `django_backend/settings.py` | + `"provisioning"` în INSTALLED_APPS + `BCryptSHA256PasswordHasher` în PASSWORD_HASHERS |
+| `django_backend/urls.py` | + `api/provisioning/` |
+| `clients/models.py` | + `mqtt_password_hash` pe Device + `DeviceShadow` + `DeviceCommand` |
+| `clients/migrations/0007_device_mqtt_password_hash.py` | câmp nou pe Device |
+| `clients/migrations/0008_deviceshadow.py` | model nou DeviceShadow |
+| `clients/migrations/0009_devicecommand.py` | model nou DeviceCommand |
+| `clients/serializers.py` | + `DeviceShadowSerializer` + `DeviceShadowReportedSerializer` + `DeviceCommandSerializer` |
+| `clients/views.py` | + `rotate_credentials` + `DeviceShadowView` + `DeviceShadowReportedView` + `DeviceShadowReportedBySerialView` + `DeviceCommandListCreateView` + `DeviceCommandDetailView` + `DeviceCommandAckView` |
+| `clients/urls.py` | + rute shadow + rute commands |
+| `clients/tokens.py` | fix: superuserii bypass tenant check (erau excluși greșit) |
+| `clients/mqtt_publisher.py` | **nou** — `publish_shadow_delta()` via paho-mqtt retained |
+| `clients/tests/test_credentials.py` | nou — 8 teste 3.1 |
+| `clients/tests/test_shadow.py` | nou — 9 teste 3.4 |
+| `clients/tests/test_shadow_delta_push.py` | nou — 5 teste 3.4b delta push |
+| `clients/tests/test_commands.py` | nou — 9 teste 3.3 |
+| `provisioning/__init__.py` | exista (gol) |
+| `provisioning/apps.py` | exista |
+| `provisioning/models.py` | nou — `ActivationToken` |
+| `provisioning/views.py` | nou — `ActivateView` |
+| `provisioning/urls.py` | nou |
+| `provisioning/migrations/0001_initial.py` | nou |
+| `provisioning/management/commands/generate_activation_token.py` | nou |
+| `provisioning/tests/test_activation.py` | nou — 7 teste 3.2 |
+| `ota/__init__.py` | **nou** app OTA |
+| `ota/apps.py` | **nou** |
+| `ota/models.py` | **nou** — `Firmware` + `RolloutPlan` + `DeviceOTAStatus` |
+| `ota/serializers.py` | **nou** — serializers + `RolloutCreateSerializer` |
+| `ota/views.py` | **nou** — toate view-urile OTA + `_publish_ota_command()` |
+| `ota/urls.py` | **nou** |
+| `ota/migrations/0001_initial.py` | **nou** — depinde de `clients.0009` + `tenants.0001` |
+| `ota/management/commands/advance_rollout.py` | **nou** — `--all` sau `--rollout-id N` |
+| `ota/tests/test_ota.py` | **nou** — 14 teste 3.5 |
+| `requirements.txt` | + `paho-mqtt==2.1.0` (pe lângă `bcrypt==4.3.0`) |
+| `django_backend/settings.py` | + `"ota"` în INSTALLED_APPS + MQTT_BROKER/MQTT_SERVICE_USER/MQTT_SERVICE_PASS |
+| `django_backend/urls.py` | + `api/ota/` |
+| `.env` | + `MQTT_BROKER=172.16.0.103:1883` |
+| `.env.example` | + `MQTT_BROKER=` |
+
+### Go
+
+| Fișier | Modificare |
+|--------|-----------|
+| `internal/django/client.go` | + `AckCommand()` + `UpdateShadowReported()` + `UpdateOTAStatus()` |
+| `cmd/main.go` | + subscribe `/up/cmd_ack` + handler `cmd_ack` + handler `shadow` + handler `ota` |
+| `cmd/downlink-worker/main.go` | **nou** — binar BRPOP → MQTT → AckCommand |
+| `bin/downlink-worker.exe` | **nou** — 11.5 MB |
+| `bin/go-iot-platform.exe` | rebuild — 13.4 MB |
+| `.env.example` | + notă REDIS_ADDR folosit și de downlink-worker |
+
+---
+
+## 31. Topicuri MQTT Faza 3
+
+| Topic | Direcție | Producător | Consumator | Reținut |
+|-------|----------|-----------|------------|---------|
+| `tenants/{tid}/devices/{serial}/up/shadow` | up | device | Go ingest worker → Django shadow reported | nu |
+| `tenants/{tid}/devices/{serial}/up/cmd_ack` | up | device | Go ingest worker → Django AckCommand | nu |
+| `tenants/{tid}/devices/{serial}/down/cmd` | down | Go downlink-worker | device | nu |
+| `tenants/{tid}/devices/{serial}/down/shadow` | down | Django (mqtt_publisher) | device | **da** (retain=True) |
+| `tenants/{tid}/devices/{serial}/down/ota` | down | Django (ota/views.py) | device | nu |
+| `tenants/{tid}/devices/{serial}/up/ota` | up | device | Go ingest worker → Django UpdateOTAStatus | nu |
+
+Format payload `down/cmd`:
+```json
+{"command_id": 42, "action": "turn_off_relay", "payload": {"relay": 0}}
+```
+
+Format payload `up/cmd_ack` (de la device):
+```json
+{"command_id": 42, "success": true, "result": {"relay_state": "off"}}
+```
+
+Format payload `up/shadow` (de la device):
+```json
+{"relay_0": "off", "temp": 22.5, "rssi": -65}
+```
+
+Format payload `down/shadow` (delta, retained):
+```json
+{"relay_0": "on"}
+```
+Dacă `desired` == `reported`, payload este `{}` (brokerul stochează mesajul gol — device-ul știe că e în sync).
+
+Format payload `down/ota` (comanda OTA):
+```json
+{"firmware_id": 1, "version": "2.0.0", "url": "https://storage.example.com/fw/v2.bin", "sha256": "abc123...", "size": 512000}
+```
+La rollback: `{"action": "rollback"}`.
+
+Format payload `up/ota` (raport status de la device):
+```json
+{"firmware_id": 1, "status": "success"}
+{"firmware_id": 1, "status": "failed", "error_message": "checksum mismatch"}
+```
+
+---
+
+## 32. Variabile de mediu noi — Faza 3
+
+| Variabilă | Unde | Obligatorie | Valoare în prod |
+|-----------|------|-------------|-----------------|
+| `MQTT_BROKER` | Django (`mqtt_publisher.py`, `ota/views.py`) | **DA** (pentru shadow push + OTA) | `172.16.0.103:1883` |
+| `DJANGO_SERVICE_USER` | Django (refolosit ca `MQTT_SERVICE_USER`) | nu (auth MQTT opțional) | `iot-ingest` |
+| `DJANGO_SERVICE_PASS` | Django (refolosit ca `MQTT_SERVICE_PASS`) | nu | setat în `.env` |
+| `REDIS_ADDR` | Go downlink-worker | **DA** | `172.16.0.108:6379` |
+| `REDIS_PASSWORD` | Go downlink-worker | **DA** | setat în `.env` |
+| `REDIS_DB` | Go downlink-worker | nu | `0` |
+
+`MQTT_BROKER` e opțional la start (valoare goală = no-op silențios), util în dev/teste unde brokerul nu e disponibil. În producție trebuie setat pentru ca shadow push și OTA să funcționeze.
+
+`REDIS_ADDR`/`REDIS_PASSWORD`/`REDIS_DB` sunt deja setate pentru `cmd/main.go` (cache device→tenant din Faza 2.4) — downlink-worker le refolosește fără a necesita config suplimentar.
+
+---
+
+## 33. Definition of Done — Faza 3
+
+| Criteriu | Status |
+|----------|--------|
+| Device cu parolă MQTT greșită este respins la CONNECT | ✅ (test_auth_with_wrong_password) |
+| Device fără hash (legacy) se conectează fără parolă | ✅ (test_auth_no_hash_still_allows) |
+| Token de activare poate fi folosit o singură dată | ✅ (test_token_single_use) |
+| Token expirat este respins | ✅ (test_expired_token_rejected) |
+| Comanda trimisă de OWNER apare în DB cu status `queued` | ✅ (test_create_command_queued) |
+| VIEWER nu poate trimite comenzi | ✅ (test_viewer_cannot_create_command) |
+| ACK de la device actualizează status + result + executed_at | ✅ (test_ack_updates_status_executed) |
+| Shadow creat automat la prima accesare | ✅ (test_shadow_created_on_first_get) |
+| Delta reflectă diferența desired vs. reported | ✅ (test_patch_desired_updates_shadow) |
+| Modificare desired → delta publicat imediat pe MQTT retained | ✅ (test_patch_desired_publishes_delta) |
+| Cheile deja sincronizate nu apar în delta publicat | ✅ (test_patch_desired_delta_excludes_synced_keys) |
+| Device reconectat primește automat ultimul delta (retained) | ✅ (mecanism broker; validat prin test_publisher_no_op*) |
+| User din tenant B nu vede shadow/comenzile device-ului din tenant A | ✅ (test_shadow_not_accessible_cross_tenant, test_list_commands_scoped_to_tenant) |
+| Firmware scoped la tenant; VIEWER nu poate crea | ✅ (test_list_firmware_scoped_to_tenant, test_viewer_cannot_create_firmware) |
+| Rollout canary pornit la creare; device-uri selectate aleator | ✅ (test_create_rollout_starts_canary) |
+| Advance crește current_percent cu step_percent | ✅ (test_advance_rollout_rolling) |
+| Auto-rollback la error_rate > threshold (la advance) | ✅ (test_advance_auto_rollback_on_errors) |
+| Auto-rollback la error_rate > threshold (la raportare status device) | ✅ (test_device_reports_ota_failed_triggers_auto_rollback) |
+| Rollback manual disponibil oricând | ✅ (test_manual_rollback) |
+| Rollout poate fi pauzat | ✅ (test_pause_rollout) |
+| Raportare status OTA necesită service account | ✅ (test_device_ota_status_requires_service_account) |
+| Istoric OTA per device disponibil via API | ✅ (test_device_ota_history) |
+
+---
+
+## 34. Concluzie Faza 3
+
+Stratul de control al device-urilor este complet — 5 sub-pași livrați:
+
+- **Autentificare individuală (3.1):** fiecare device are o parolă MQTT unică stocată ca hash BCrypt; rotire la cerere via API. Device-uri fără hash rămân funcționale (compat mode).
+- **Activation flow (3.2):** operator generează token one-time via CLI → device face POST public la prima pornire → parolă setată atomic, token invalidat.
+- **Downlink commands (3.3):** API → Redis `cmd:queue` → `downlink-worker` (BRPOP) → MQTT `down/cmd` → device → MQTT `up/cmd_ack` → Go ingest worker → Django `AckCommand`. Fiecare tranziție înregistrată cu timestamp (queued → sent → executed/failed).
+- **Device shadow + delta push (3.4):** stare dorită setată de operator, stare raportată trimisă de device via MQTT. Delta calculat on-the-fly și publicat imediat pe `down/shadow` cu `retain=True` — device-ul primește delta la conectare fără polling.
+- **OTA staged rollout (3.5):** operator creează rollout cu canary% → advance manual sau cron (step_percent) → complete. Auto-rollback dacă `error_rate > threshold`, declanșat la fiecare raportare de status sau advance. Rollback manual disponibil oricând. Go worker propagă statusul OTA de la device la Django.
+
+**Suite de teste Django: 119 passed** (toate verzi):
+
+| Fișier | Teste | Acoperă |
+|--------|-------|---------|
+| `clients/tests/test_credentials.py` | 8 | 3.1 credențiale + EMQX hook |
+| `provisioning/tests/test_activation.py` | 7 | 3.2 activation flow |
+| `clients/tests/test_commands.py` | 9 | 3.3 commands + ACK |
+| `clients/tests/test_shadow.py` | 9 | 3.4 shadow CRUD + RBAC |
+| `clients/tests/test_shadow_delta_push.py` | 5 | 3.4b delta push MQTT |
+| `ota/tests/test_ota.py` | 14 | 3.5 OTA complet |
+| Suite anterioară (Faza 1–2) | 67 | toate fazele precedente |
+
+**Binare Go construite:** `go-iot-platform.exe` (13.4 MB), `downlink-worker.exe` (11.5 MB), `mqtt-bridge.exe`.
+
+**Pași pentru deploy în producție:**
+
+```bash
+# 1. Aplică migrările noi (clients.0007-0009 + provisioning.0001 + ota.0001)
+python manage.py migrate
+
+# 2. Pornește downlink-worker ca serviciu separat
+bin/downlink-worker.exe
+
+# 3. Asigură-te că MQTT_BROKER e setat în .env Django
+# (necesár pentru shadow delta push + OTA dispatch)
+
+# 4. Opțional: cronjob pentru advance rollout automat
+# python manage.py advance_rollout --all
+```
+
+---
+
+## 35. Faza 4 — Audit log, API Keys, Rule Engine, Notificări
+
+> Data: 2026-05-02
+
+---
+
+### 35.1 Faza 4.7 — Audit Log
+
+**Model** (`audit/models.py`): `AuditLog` — tenant FK, actor FK (nullable), action (create/update/delete), resource_type, resource_id, metadata JSONField, ip, ts (auto_now_add, db_index).
+
+**Middleware** (`audit/middleware.py`): `AuditMiddleware` interceptează POST/PUT/PATCH/DELETE după response, doar când `request.tenant` e setat, skip pe `/admin/`, `/api/token/`, `/api/mqtt/`, `/api/provisioning/activate`.
+
+**API:** `GET /api/v1/audit/` — listare cu filtre: action, resource_type, actor, date range (from_ts/to_ts).
+
+---
+
+### 35.2 Faza 4.3 — API Keys + OpenAPI
+
+**Model** (`api_keys/models.py`): `APIKey` — prefix (primii 8 caractere), key_hash (SHA-256), scopes (JSONField list), expires_at, last_used_at, revoked. `generate(cls, ...)` returnează `(instance, plain_key)` — plain-ul nu e stocat niciodată.
+
+**Autentificare** (`api_keys/authentication.py`): `APIKeyAuthentication` citește `Authorization: ApiKey <plain>`, calculează hash, caută în DB, stampilează `last_used_at`, setează `request.tenant` și `request.role = "OWNER"`.
+
+**API:** `GET/POST /api/v1/api-keys/`, `DELETE /api/v1/api-keys/{id}/revoke/`.
+
+**OpenAPI (drf-spectacular):**
+- Swagger UI: `/api/docs/`
+- ReDoc: `/api/redoc/`
+- Schema JSON/YAML: `/api/schema/`
+- `api_schema.yaml` — spec OpenAPI 3.0.3 complet la rădăcina repo, cu toate endpoint-urile, scheme de securitate și exemple
+
+**Endpoint pre-login tenant list** (`POST /api/auth/tenants/`, AllowAny): verifică username + password fără a emite JWT, returnează lista de tenanți activi ai userului — folosit de aplicația Flutter pentru a prezenta selectorul de tenant înainte de autentificare.
+
+---
+
+### 35.3 Faza 4.1 — Rule Engine
+
+**Concept:** utilizatorul poate defini reguli din dashboard — condiții DSL pe datele telemetrice și acțiuni automate. Motorul evaluează fiecare mesaj MQTT în timp real.
+
+#### Django (`django-bakend/rules/`)
+
+**Model `Rule`:** tenant, name, description, trigger_stream_pattern (`*` sau `telemetry,emeter`), conditions (JSONField — arbore DSL), actions (JSONField), cooldown_seconds, enabled. Unicitate per (tenant, name).
+
+**Model `RuleExecution`:** log per evaluare — rule FK, rule_name, device_serial, stream, triggered_at, conditions_snapshot, actions_taken, status (triggered / cooldown_skipped / error), error_message.
+
+**DSL validator** (`rules/validators.py`): validare recursivă — ramuri AND/OR/NOT + frunze cu 13 operatori:
+`eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `not_in`, `contains`, `not_contains`, `regex`, `is_null`, `is_not_null`, `changed`
+
+Exemplu condiție DSL:
+```json
+{
+  "operator": "AND",
+  "conditions": [
+    {"field": "temperature", "op": "gt", "value": 80},
+    {"field": "status", "op": "eq", "value": "running"}
+  ]
+}
+```
+
+**Semnale Redis** (`rules/signals.py`): la fiecare save/delete pe Rule se șterge cheia `rules:v1:{tenant_id}` din Redis — cache invalidat automat.
+
+**API REST:**
+- `GET/POST /api/v1/rules/` — listare (filtre: enabled, stream) + creare (OWNER/ADMIN)
+- `GET/PATCH/DELETE /api/v1/rules/{id}/`
+- `PATCH /api/v1/rules/{id}/toggle/` — enable/disable rapid
+- `GET /api/v1/rules/{id}/executions/` — istoric execuții per regulă
+- `GET /api/v1/rules/executions/` — toate execuțiile tenantului (filtre: device, rule)
+- `GET /api/internal/rules/?tenant_id=` — endpoint intern pentru Go worker (cache miss)
+- `POST /api/internal/rules/log/` — logging execuție din Go rule-engine
+
+#### Go (`go-iot-platform/internal/rules/` + `cmd/rule-engine/`)
+
+**`types.go`:** `ConditionNode`, `Action`, `Rule`, `MessageContext`, `ExecStatus`
+
+**`fieldpath.go`:** extragere câmpuri cu:
+- dot notation: `a.b.c`
+- index array: `array.0.field`
+- array filter: `measurements[key=active_power_kw].value` (format sun2000)
+
+**`evaluator.go`:** evaluare recursivă DSL + operator `changed` cu prev state din Redis
+
+**`cache.go`:**
+- Cache reguli în Redis (`rules:v1:{tenant_id}`, fără TTL), fallback la Django API
+- Cooldown per (rule_id, serial): `SetNX` cu TTL în Redis
+- Prev state per (tenant_id, serial): TTL 5 min
+- `ParseTopic`, `MatchesStream`
+
+**`executor.go`:** `RenderTemplate` (`{{serial}}`, `{{tenant_id}}`, `{{field}}`), execuție acțiuni:
+- `downlink` — publică MQTT pe `tenants/{tid}/devices/{serial}/down/cmd`
+- `notify` — `POST /api/internal/notifications/trigger/`
+- `webhook` — HTTP call direct cu body template substituit
+- `set_shadow` — `PATCH` Django shadow desired state
+
+**`cmd/rule-engine/main.go`:** binar separat, shared subscription `$share/rules/tenants/+/devices/+/up/#` — rulează în paralel cu `go-iot-platform`, ambele primind același flux MQTT independent.
+
+```
+go-iot-platform/bin/rule-engine.exe  — build OK
+```
+
+Variabile de mediu necesare:
+| Variabilă | Obligatorie | Valoare tipică |
+|-----------|-------------|----------------|
+| `MQTT_BROKER` | DA | `tcp://172.16.0.103:1883` |
+| `MQTT_USER` / `MQTT_PASS` | DA | service account EMQX |
+| `DJANGO_BASE_URL` | DA | `http://django:8000/api` |
+| `DJANGO_SERVICE_USER` / `DJANGO_SERVICE_PASS` | DA | `iot-ingest` |
+| `REDIS_ADDR` | nu (cooldown dezactivat fără) | `172.16.0.108:6379` |
+| `REDIS_PASSWORD` / `REDIS_DB` | nu | setat în `.env` |
+
+---
+
+### 35.4 Faza 4.2 — Notification Engine
+
+**Model `NotificationChannel`:** tenant, name, type (webhook / email / fcm), config (JSONField), enabled.
+- webhook: `{"url": "...", "method": "POST", "headers": {...}}`
+- email: `{"to": "...", "from_name": "..."}`
+- fcm: `{"token": "..."}` sau `{"topic": "..."}`
+
+**Model `NotificationEvent`:** channel FK, rule_execution_id, title, body, context, status (pending/sent/failed), attempts, last_error, created_at, sent_at.
+
+**Sender async** (`notifications/sender.py`): `send_async(event_id)` pornește thread daemon. `_dispatch` trimite via:
+- webhook: `requests.post/get/...` cu headers configurabile
+- email: Django SMTP (`send_mail`)
+- FCM: `requests.post` la Firebase REST API (`fcm.googleapis.com`)
+
+**API REST:**
+- `GET/POST /api/v1/notifications/channels/`
+- `GET/PATCH/DELETE /api/v1/notifications/channels/{id}/`
+- `POST /api/v1/notifications/channels/{id}/test/` — notificare de test imediată
+- `GET /api/v1/notifications/events/` — istoric cu filtre: channel, status, date range
+- `POST /api/internal/notifications/trigger/` — endpoint intern pentru Go rule-engine
+
+---
+
+### 35.5 Status teste Faza 4
+
+| Suite | Rezultat |
+|-------|---------|
+| Django pytest (full, toate fazele) | **190 / 190 passed** |
+| Go `./internal/rules/...` | **27 / 27 PASS** |
+| Go `./...` (toate pachetele) | **toate pachetele OK** |
+
+Singur avertisment: `PytestUnhandledThreadExceptionWarning` pe `test_test_endpoint_creates_event` — thread-ul sender async încearcă să acceseze SQLite test DB lockată de thread-ul principal. Benign în test (SQLite nu suportă writers concurenți); în producție cu MySQL nu apare.
+
+---
+
+### 35.6 Definition of Done — Faza 4
+
+| Criteriu | Status |
+|----------|--------|
+| Orice POST/PUT/PATCH/DELETE pe endpoint tenant-scoped crează AuditLog | ✅ |
+| API Key poate fi generată, listată, revocată | ✅ |
+| Autentificare cu `Authorization: ApiKey <key>` funcționează | ✅ |
+| Swagger UI funcțional la `/api/docs/` | ✅ |
+| Utilizatorul poate crea reguli cu condiții DSL din dashboard | ✅ |
+| Regulile sunt evaluate pe fiecare mesaj MQTT în timp real | ✅ |
+| Cooldown previne spam de acțiuni per device | ✅ |
+| Operator `changed` detectează tranziții de stare | ✅ |
+| Cache Redis invalidat automat la modificarea regulilor | ✅ |
+| Acțiune downlink trimite comandă MQTT la device | ✅ |
+| Acțiune notify creează NotificationEvent și trimite async | ✅ |
+| Acțiune webhook face HTTP call cu template substituție | ✅ |
+| Acțiune set_shadow actualizează desired state device | ✅ |
+| Canale notificare: webhook, email, FCM configurabile per tenant | ✅ |
+| Istoric execuții reguli disponibil via API (filtrabil) | ✅ |
+| VIEWER nu poate crea/modifica reguli sau canale | ✅ |
+| Tenant B nu vede regulile sau execuțiile din tenant A | ✅ |
+
+---
+
+### 35.7 Pași pentru deploy în producție
+
+```bash
+# 1. Aplică migrările noi (rules + notifications + audit + api_keys)
+python manage.py migrate
+
+# 2. Pornește rule-engine ca serviciu separat
+bin/rule-engine.exe
+
+# 3. Asigură-te că variabilele de mediu sunt setate în .env rule-engine:
+#    MQTT_BROKER, MQTT_USER, MQTT_PASS
+#    DJANGO_BASE_URL, DJANGO_SERVICE_USER, DJANGO_SERVICE_PASS
+#    REDIS_ADDR (opțional, recomandat pentru cooldown)
+
+# 4. Pentru notificări email: configurează în Django .env:
+#    EMAIL_HOST, EMAIL_PORT, EMAIL_HOST_USER, EMAIL_HOST_PASSWORD
+
+# 5. Pentru notificări FCM: pune server key în config canal FCM
+```

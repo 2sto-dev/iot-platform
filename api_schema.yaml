@@ -1,0 +1,1241 @@
+openapi: 3.0.3
+
+info:
+  title: IoT Platform API
+  description: |
+    REST API pentru managementul device-urilor IoT, telemetrie și control.
+
+    ## Autentificare
+    Toate endpoint-urile (în afara `/api/token/` și `/api/provisioning/activate/`)
+    necesită fie **JWT Bearer token** fie **API Key**.
+
+    ### JWT flow
+    1. `POST /api/token/` → primești `access` + `refresh` + `tenant_slug` + `role`
+    2. Adaugă header: `Authorization: Bearer <access>`
+    3. La expirare: `POST /api/token/refresh/` cu `refresh` → nou `access`
+
+    ### API Key flow
+    1. Creează cheie din `POST /api/v1/api-keys/` (OWNER/ADMIN)
+    2. Adaugă header: `Authorization: ApiKey <plain_key>`
+
+    ## Roluri
+    | Rol | GET | POST/PUT/PATCH | DELETE |
+    |-----|-----|----------------|--------|
+    | OWNER | ✓ | ✓ | ✓ |
+    | ADMIN | ✓ | ✓ | ✓ |
+    | OPERATOR | ✓ | ✓ | ✗ |
+    | INSTALLER | ✓ | ✓ | ✗ |
+    | VIEWER | ✓ | ✗ | ✗ |
+  version: "1.0.0"
+  contact:
+    email: office@airweb.ro
+
+servers:
+  - url: http://172.16.0.105:8000
+    description: Production server
+
+tags:
+  - name: auth
+    description: Login și refresh JWT
+  - name: devices
+    description: CRUD device-uri
+  - name: shadow
+    description: Device shadow (stare dorită vs. raportată)
+  - name: commands
+    description: Comenzi downlink cu ACK tracking
+  - name: ota
+    description: Firmware și rollout OTA
+  - name: audit
+    description: Audit log tenant (OWNER/ADMIN)
+  - name: api-keys
+    description: Managementul cheilor API (OWNER/ADMIN)
+
+# ─── Security schemes ────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: "Format: `ApiKey <plain_key>`"
+
+  # ─── Shared schemas ─────────────────────────────────────────────────────────
+  schemas:
+
+    # Auth
+    TokenRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          example: alice
+        password:
+          type: string
+          format: password
+          example: "secret123"
+        tenant_slug:
+          type: string
+          description: Obligatoriu dacă userul are membership în mai mulți tenants.
+          example: acme
+
+    TokenResponse:
+      type: object
+      properties:
+        access:
+          type: string
+          description: JWT access token (valabil 100 min).
+        refresh:
+          type: string
+          description: JWT refresh token (valabil 7 zile).
+        tenant_slug:
+          type: string
+          example: acme
+        role:
+          type: string
+          enum: [OWNER, ADMIN, OPERATOR, VIEWER, INSTALLER]
+          example: OWNER
+
+    TokenRefreshRequest:
+      type: object
+      required: [refresh]
+      properties:
+        refresh:
+          type: string
+
+    TokenRefreshResponse:
+      type: object
+      properties:
+        access:
+          type: string
+
+    # Device
+    Device:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+          example: 3
+        serial_number:
+          type: string
+          example: "39371381"
+        description:
+          type: string
+          example: "Invertor solar terasa"
+        device_type:
+          type: string
+          enum: [shelly_em, nous_at, zigbee_sensor, auto_detected, sun2000]
+          example: sun2000
+        client:
+          type: integer
+          description: ID-ul userului owner.
+          example: 1
+        tenant:
+          type: integer
+          description: ID-ul tenantului.
+          example: 2
+        tenant_plan:
+          type: string
+          readOnly: true
+          enum: [free, pro, enterprise]
+          example: enterprise
+        topics:
+          type: array
+          readOnly: true
+          description: Topic-urile MQTT aferente device-ului (generate din template).
+          items:
+            type: string
+          example:
+            - "/39371381/+/+/telemetry"
+
+    DeviceCreate:
+      type: object
+      required: [serial_number, device_type]
+      properties:
+        serial_number:
+          type: string
+          example: SHELF001
+        description:
+          type: string
+        device_type:
+          type: string
+          enum: [shelly_em, nous_at, zigbee_sensor, auto_detected, sun2000]
+
+    # Shadow
+    DeviceShadow:
+      type: object
+      properties:
+        reported:
+          type: object
+          readOnly: true
+          description: Ultima stare raportată de device via MQTT.
+          example:
+            relay_0: "on"
+            temperature: 23.5
+        desired:
+          type: object
+          description: Starea dorită setată de operator.
+          example:
+            relay_0: "off"
+        delta:
+          type: object
+          readOnly: true
+          description: "Diferența: chei din desired care diferă față de reported."
+          example:
+            relay_0: "off"
+        version:
+          type: integer
+          readOnly: true
+          example: 7
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+
+    ShadowDesiredPatch:
+      type: object
+      properties:
+        desired:
+          type: object
+          example:
+            relay_0: "off"
+            brightness: 80
+
+    # Command
+    DeviceCommand:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+          example: 42
+        action:
+          type: string
+          example: turn_off_relay
+        payload:
+          type: object
+          example:
+            relay: 0
+        status:
+          type: string
+          readOnly: true
+          enum: [queued, sent, executed, failed]
+          example: executed
+        result:
+          type: object
+          readOnly: true
+          description: Payload de ACK returnat de device.
+          example:
+            ok: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        sent_at:
+          type: string
+          format: date-time
+          nullable: true
+          readOnly: true
+        executed_at:
+          type: string
+          format: date-time
+          nullable: true
+          readOnly: true
+        timed_out:
+          type: boolean
+          readOnly: true
+          description: True dacă status=sent și sent_at > 5 min în urmă.
+
+    DeviceCommandCreate:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          example: turn_off_relay
+        payload:
+          type: object
+          example:
+            relay: 0
+
+    # OTA Firmware
+    Firmware:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        version:
+          type: string
+          example: "2.1.0"
+        device_type:
+          type: string
+          enum: [shelly_em, nous_at, zigbee_sensor, auto_detected, sun2000]
+        url:
+          type: string
+          format: uri
+          example: "https://firmware.example.com/shelly-em-2.1.0.bin"
+        checksum:
+          type: string
+          description: SHA-256 al binarului.
+          example: "abc123..."
+        release_notes:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+
+    # OTA Rollout
+    Rollout:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        firmware:
+          $ref: '#/components/schemas/Firmware'
+        status:
+          type: string
+          enum: [draft, active, paused, completed, rolled_back]
+          readOnly: true
+        current_stage_pct:
+          type: integer
+          description: Procentul curent de device-uri în rollout (0-100).
+        total_devices:
+          type: integer
+          readOnly: true
+        updated_devices:
+          type: integer
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+
+    DeviceOTAStatus:
+      type: object
+      properties:
+        serial_number:
+          type: string
+        firmware_version:
+          type: string
+        status:
+          type: string
+          enum: [pending, downloading, installing, success, failed]
+        updated_at:
+          type: string
+          format: date-time
+
+    # Audit
+    AuditLog:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        action:
+          type: string
+          enum: [create, update, delete]
+        resource_type:
+          type: string
+          example: devices
+        resource_id:
+          type: string
+          example: "3"
+        actor_username:
+          type: string
+          nullable: true
+          example: alice
+        ip:
+          type: string
+          nullable: true
+          example: "192.168.1.10"
+        metadata:
+          type: object
+          example:
+            path: /api/devices/3/
+            status: 200
+        ts:
+          type: string
+          format: date-time
+
+    # API Key
+    APIKey:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          example: "Flutter app prod"
+        prefix:
+          type: string
+          readOnly: true
+          description: Primele 8 caractere ale cheii (pentru identificare vizuală).
+          example: "aB3kLm9x"
+        scopes:
+          type: array
+          items:
+            type: string
+          example: ["read"]
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+          readOnly: true
+        revoked:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        created_by_username:
+          type: string
+          nullable: true
+          readOnly: true
+
+    APIKeyCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          example: "Flutter app prod"
+        scopes:
+          type: array
+          items:
+            type: string
+          example: ["read"]
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    APIKeyCreateResponse:
+      allOf:
+        - $ref: '#/components/schemas/APIKey'
+        - type: object
+          properties:
+            plain_key:
+              type: string
+              description: Cheia în clar — returnată O SINGURĂ DATĂ. Salvează-o imediat.
+              example: "aB3kLm9xT7vRz2nQpWsYcUeHdFgJbKiM"
+
+    # Generic errors
+    Error401:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: "Authentication credentials were not provided."
+    Error403:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: "Only OWNER and ADMIN can access the audit log."
+    Error404:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: "Not found."
+
+# ─── Paths ───────────────────────────────────────────────────────────────────
+paths:
+
+  # ── Auth ──────────────────────────────────────────────────────────────────
+  /api/auth/tenants/:
+    post:
+      tags: [auth]
+      summary: Pre-login — lista de tenanți ai userului
+      description: |
+        **Primul apel din Flutter** — înainte de login.
+        Returnează toți tenanții activi ai userului cu rolul corespunzător.
+        Nu emite niciun JWT.
+
+        **Flutter flow:**
+        1. Apelează acest endpoint cu `username` + `password`
+        2. Dacă răspunsul are 1 tenant → direct la `POST /api/token/` (fără `tenant_slug`)
+        3. Dacă răspunsul are >1 tenanți → afișează picker → utilizatorul alege
+        4. Apelează `POST /api/token/` cu `tenant_slug` ales
+      operationId: authTenantList
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  example: alice
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Lista de tenanți activi
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    slug:
+                      type: string
+                      example: acme
+                    name:
+                      type: string
+                      example: Acme SRL
+                    plan:
+                      type: string
+                      enum: [free, pro, enterprise]
+                      example: enterprise
+                    role:
+                      type: string
+                      enum: [OWNER, ADMIN, OPERATOR, VIEWER, INSTALLER]
+                      example: OWNER
+              examples:
+                single_tenant:
+                  summary: User cu un singur tenant
+                  value:
+                    - slug: acme
+                      name: Acme SRL
+                      plan: enterprise
+                      role: OWNER
+                multi_tenant:
+                  summary: User cu mai mulți tenanți
+                  value:
+                    - slug: acme
+                      name: Acme SRL
+                      plan: enterprise
+                      role: OWNER
+                    - slug: beta-client
+                      name: Beta Client SA
+                      plan: pro
+                      role: VIEWER
+        '400':
+          description: username sau password lipsă
+        '401':
+          description: Credențiale greșite
+
+  /api/token/:
+    post:
+      tags: [auth]
+      summary: Login — obține JWT
+      description: |
+        Returnează `access` (100 min) + `refresh` (7 zile) + `tenant_slug` + `role`.
+        Dacă userul are membership în mai mulți tenants, trimite și `tenant_slug` în body.
+      operationId: authLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRequest'
+      responses:
+        '200':
+          description: Autentificare reușită
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: Credențiale greșite sau tenant_slug lipsă/incorect
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+
+  /api/token/refresh/:
+    post:
+      tags: [auth]
+      summary: Refresh access token
+      operationId: authRefresh
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefreshRequest'
+      responses:
+        '200':
+          description: Nou access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenRefreshResponse'
+        '401':
+          description: Refresh token invalid sau expirat
+
+  # ── Devices ──────────────────────────────────────────────────────────────
+  /api/devices/:
+    get:
+      tags: [devices]
+      summary: Listează device-urile tenantului
+      operationId: deviceList
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - in: query
+          name: tenant
+          schema:
+            type: integer
+          description: Filtru pe tenant ID (doar service accounts cross-tenant).
+      responses:
+        '200':
+          description: Listă device-uri
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Device'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      tags: [devices]
+      summary: Creează device nou
+      operationId: deviceCreate
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceCreate'
+      responses:
+        '201':
+          description: Device creat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '400':
+          description: Date invalide (ex. serial_number duplicat în tenant)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/devices/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/DeviceId'
+    get:
+      tags: [devices]
+      summary: Detalii device
+      operationId: deviceRetrieve
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags: [devices]
+      summary: Actualizează câmpuri device (partial update)
+      operationId: devicePartialUpdate
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceCreate'
+      responses:
+        '200':
+          description: Device actualizat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [devices]
+      summary: Șterge device (OWNER/ADMIN)
+      operationId: deviceDelete
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      responses:
+        '204':
+          description: Șters
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/devices/{id}/credentials/rotate/:
+    parameters:
+      - $ref: '#/components/parameters/DeviceId'
+    post:
+      tags: [devices]
+      summary: Rotire credențiale MQTT per-device (OWNER/ADMIN)
+      description: |
+        Generează o parolă MQTT nouă pentru device. Returnată **o singură dată**.
+        Device-ul trebuie reconfigurat manual cu parola primită.
+      operationId: deviceRotateCredentials
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Credențiale noi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  serial_number:
+                    type: string
+                  mqtt_password:
+                    type: string
+                    description: Parolă plaintext — salvează imediat, nu se mai afișează.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Shadow ────────────────────────────────────────────────────────────────
+  /api/devices/{id}/shadow/:
+    parameters:
+      - $ref: '#/components/parameters/DeviceId'
+    get:
+      tags: [shadow]
+      summary: Citește shadow (reported + desired + delta)
+      description: |
+        - `reported` = ultima stare raportată de device via MQTT (`up/shadow`)
+        - `desired` = starea dorită setată de operator
+        - `delta` = chei din desired care diferă față de reported
+      operationId: shadowRetrieve
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Shadow curent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceShadow'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags: [shadow]
+      summary: Actualizează desired state
+      description: |
+        Setează starea dorită. Go-ul publică automat delta pe topicul MQTT
+        `tenants/{tid}/devices/{serial}/down/shadow` ca mesaj **retained**.
+      operationId: shadowUpdateDesired
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShadowDesiredPatch'
+      responses:
+        '200':
+          description: Shadow actualizat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceShadow'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ── Commands ──────────────────────────────────────────────────────────────
+  /api/devices/{id}/commands/:
+    parameters:
+      - $ref: '#/components/parameters/DeviceId'
+    get:
+      tags: [commands]
+      summary: Listează comenzile device-ului
+      operationId: commandList
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Listă comenzi
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeviceCommand'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [commands]
+      summary: Trimite comandă downlink
+      description: |
+        Creează comanda cu status `queued`, o pune în coada Redis.
+        Go downlink-worker o publică pe MQTT și trece status-ul la `sent`.
+        Device-ul răspunde pe `up/cmd_ack` → status devine `executed` sau `failed`.
+      operationId: commandCreate
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceCommandCreate'
+            examples:
+              turn_off:
+                summary: Oprire relay
+                value:
+                  action: turn_off_relay
+                  payload:
+                    relay: 0
+              restart:
+                summary: Restart device
+                value:
+                  action: restart
+                  payload: {}
+      responses:
+        '201':
+          description: Comandă creată (queued)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  status:
+                    type: string
+                    example: queued
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/devices/{id}/commands/{cmd_id}/:
+    parameters:
+      - $ref: '#/components/parameters/DeviceId'
+      - $ref: '#/components/parameters/CommandId'
+    get:
+      tags: [commands]
+      summary: Status comandă
+      description: |
+        Polling pe această resursă pentru a urmări progresul comenzii.
+        Câmpul `timed_out: true` apare dacă status=sent și > 5 min fără ACK.
+      operationId: commandRetrieve
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Detalii comandă
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceCommand'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── OTA ──────────────────────────────────────────────────────────────────
+  /api/ota/firmware/:
+    get:
+      tags: [ota]
+      summary: Listează firmware disponibil
+      operationId: firmwareList
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - in: query
+          name: device_type
+          schema:
+            type: string
+            enum: [shelly_em, nous_at, zigbee_sensor, auto_detected, sun2000]
+      responses:
+        '200':
+          description: Listă firmware
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Firmware'
+
+    post:
+      tags: [ota]
+      summary: Înregistrează versiune firmware nouă (OWNER/ADMIN)
+      operationId: firmwareCreate
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Firmware'
+      responses:
+        '201':
+          description: Firmware înregistrat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Firmware'
+
+  /api/ota/firmware/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/GenericId'
+    get:
+      tags: [ota]
+      summary: Detalii firmware
+      operationId: firmwareRetrieve
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Firmware'
+
+  /api/ota/rollouts/:
+    get:
+      tags: [ota]
+      summary: Listează rollout-uri
+      operationId: rolloutList
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Listă rollout-uri
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Rollout'
+
+    post:
+      tags: [ota]
+      summary: Creează rollout nou (OWNER/ADMIN)
+      operationId: rolloutCreate
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [firmware]
+              properties:
+                firmware:
+                  type: integer
+                  description: ID firmware
+                current_stage_pct:
+                  type: integer
+                  default: 10
+      responses:
+        '201':
+          description: Rollout creat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rollout'
+
+  /api/ota/rollouts/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/GenericId'
+    get:
+      tags: [ota]
+      summary: Detalii rollout
+      operationId: rolloutRetrieve
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rollout'
+
+  /api/ota/rollouts/{id}/advance/:
+    parameters:
+      - $ref: '#/components/parameters/GenericId'
+    post:
+      tags: [ota]
+      summary: Avansează rollout la etapa următoare (OWNER/ADMIN)
+      operationId: rolloutAdvance
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Rollout avansat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rollout'
+
+  /api/ota/rollouts/{id}/pause/:
+    parameters:
+      - $ref: '#/components/parameters/GenericId'
+    post:
+      tags: [ota]
+      summary: Oprește temporar rollout-ul (OWNER/ADMIN)
+      operationId: rolloutPause
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Rollout pauzat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rollout'
+
+  /api/ota/rollouts/{id}/rollback/:
+    parameters:
+      - $ref: '#/components/parameters/GenericId'
+    post:
+      tags: [ota]
+      summary: Rollback la firmware anterior (OWNER/ADMIN)
+      operationId: rolloutRollback
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Rollback inițiat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rollout'
+
+  /api/devices/{id}/ota/:
+    parameters:
+      - $ref: '#/components/parameters/DeviceId'
+    get:
+      tags: [ota]
+      summary: Istoricul OTA al unui device
+      operationId: deviceOtaHistory
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Istoricul actualizărilor OTA
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeviceOTAStatus'
+
+  # ── Audit log ─────────────────────────────────────────────────────────────
+  /api/v1/audit/:
+    get:
+      tags: [audit]
+      summary: Audit log al tenantului (OWNER/ADMIN)
+      operationId: auditList
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: from
+          schema:
+            type: string
+            format: date-time
+          description: Filtrare de la această dată (ISO 8601).
+          example: "2026-01-01T00:00:00Z"
+        - in: query
+          name: to
+          schema:
+            type: string
+            format: date-time
+          description: Filtrare până la această dată.
+        - in: query
+          name: actor
+          schema:
+            type: string
+          description: Username actor.
+          example: alice
+      responses:
+        '200':
+          description: Listă log-uri
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditLog'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ── API Keys ──────────────────────────────────────────────────────────────
+  /api/v1/api-keys/:
+    get:
+      tags: [api-keys]
+      summary: Listează cheile API active ale tenantului (OWNER/ADMIN)
+      operationId: apiKeyList
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Listă chei (fără plaintext)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/APIKey'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      tags: [api-keys]
+      summary: Creează cheie API nouă (OWNER/ADMIN)
+      description: |
+        Returnează `plain_key` **o singură dată** — nu poate fi recuperat ulterior.
+        Stochează-l securizat în aplicație (ex. `flutter_secure_storage`).
+      operationId: apiKeyCreate
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/APIKeyCreate'
+      responses:
+        '201':
+          description: Cheie creată
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIKeyCreateResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/api-keys/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/GenericId'
+    delete:
+      tags: [api-keys]
+      summary: Revocă cheie API (OWNER/ADMIN)
+      operationId: apiKeyRevoke
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Revocat
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+# ─── Reusable parameters & responses ────────────────────────────────────────
+  parameters:
+    DeviceId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+      description: ID-ul device-ului.
+
+    CommandId:
+      name: cmd_id
+      in: path
+      required: true
+      schema:
+        type: integer
+      description: ID-ul comenzii.
+
+    GenericId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+
+  responses:
+    Unauthorized:
+      description: Token lipsă sau invalid
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error401'
+    Forbidden:
+      description: Rol insuficient
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error403'
+    NotFound:
+      description: Resursă negăsită
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error404'

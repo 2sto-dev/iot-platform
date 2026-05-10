@@ -1,8 +1,9 @@
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from rest_framework import serializers
 
 from tenants.models import Tenant
-from .models import Device
+from .models import Device, DeviceShadow, DeviceCommand
 from .topic_templates import TOPIC_TEMPLATES
 
 
@@ -34,4 +35,41 @@ class DeviceSerializer(serializers.ModelSerializer):
     def get_topics(self, obj):
         template_list = TOPIC_TEMPLATES.get(obj.device_type, [])
         return [t.format(serial=obj.serial_number) for t in template_list]
+
+
+class DeviceShadowSerializer(serializers.ModelSerializer):
+    delta = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DeviceShadow
+        fields = ["reported", "desired", "delta", "version", "updated_at"]
+        read_only_fields = ["reported", "delta", "version", "updated_at"]
+
+    def get_delta(self, obj):
+        return {k: v for k, v in obj.desired.items() if obj.reported.get(k) != v}
+
+
+class DeviceShadowReportedSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DeviceShadow
+        fields = ["reported", "version", "updated_at"]
+        read_only_fields = ["version", "updated_at"]
+
+
+class DeviceCommandSerializer(serializers.ModelSerializer):
+    timed_out = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DeviceCommand
+        fields = [
+            "id", "action", "payload", "status", "result",
+            "created_at", "sent_at", "executed_at", "timed_out",
+        ]
+        read_only_fields = ["id", "status", "result", "created_at", "sent_at", "executed_at"]
+
+    def get_timed_out(self, obj):
+        if obj.status == DeviceCommand.Status.SENT and obj.sent_at:
+            from datetime import timedelta
+            return obj.sent_at < timezone.now() - timedelta(minutes=5)
+        return False
 

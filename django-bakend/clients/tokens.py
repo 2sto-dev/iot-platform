@@ -16,9 +16,31 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         # Authenticate without letting the parent build tokens (we need tenant info first).
         super(TokenObtainPairSerializer, self).validate(attrs)
 
-        # Service accounts (clients.view_device) bypass tenant selection — they're
-        # cross-tenant by design. Token has no tenant_id/role claims.
-        if self.user.has_perm("clients.view_device") and not self.user.is_superuser:
+        requested = self.context["request"].data.get("tenant_slug")
+        is_service = self.user.is_superuser or self.user.has_perm("clients.view_device")
+
+        # Service accounts (superuser or clients.view_device) bypass membership check.
+        if is_service:
+            if requested:
+                # Superuser logged into a specific tenant context — embed tenant in JWT.
+                try:
+                    tenant = Tenant.objects.get(slug=requested, status=Tenant.Status.ACTIVE)
+                except Tenant.DoesNotExist:
+                    raise serializers.ValidationError(
+                        {"tenant_slug": f"Tenant '{requested}' not found or inactive."}
+                    )
+                refresh = self.get_token(self.user)
+                refresh["tenant_id"] = tenant.id
+                refresh["tenant_slug"] = tenant.slug
+                refresh["role"] = "OWNER"
+                refresh["is_service"] = True
+                return {
+                    "refresh": str(refresh),
+                    "access": str(refresh.access_token),
+                    "tenant_slug": tenant.slug,
+                    "role": "OWNER",
+                }
+            # No tenant_slug → pure cross-tenant token (no tenant claims).
             refresh = self.get_token(self.user)
             return {"refresh": str(refresh), "access": str(refresh.access_token)}
 

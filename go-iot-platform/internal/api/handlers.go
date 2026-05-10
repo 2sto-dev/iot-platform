@@ -25,6 +25,7 @@ type tokenContext struct {
 	TenantID   int64
 	TenantSlug string
 	Role       string
+	IsService  bool
 }
 
 func getTokenContext(r *http.Request) (tokenContext, error) {
@@ -56,6 +57,9 @@ func getTokenContext(r *http.Request) (tokenContext, error) {
 	}
 	if s, ok := claims["role"].(string); ok {
 		ctx.Role = s
+	}
+	if b, ok := claims["is_service"].(bool); ok {
+		ctx.IsService = b
 	}
 	if ctx.TenantID == 0 {
 		return tokenContext{}, fmt.Errorf("tenant_id missing in token")
@@ -93,20 +97,23 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	allowed := false
+	plan := ""
 	for _, d := range devices {
 		if d.Serial == device {
 			allowed = true
+			plan = d.TenantPlan
 			break
 		}
 	}
 	if !allowed {
-		log.Printf("⛔ user=%s tenant=%d nu are acces la device=%s", tc.Username, tc.TenantID, device)
+		log.Printf("⛔ user=%s tenant=%d nu are acces la device=%s (nu e în tenantul curent)", tc.Username, tc.TenantID, device)
 		http.Error(w, "Device not allowed for user/tenant", http.StatusForbidden)
 		return
 	}
 
 	rangeStr := r.URL.Query().Get("range")
-	val, err := influx.GetFieldForDevice(device, field, rangeStr, tc.TenantID)
+	// Strict tenant isolation: query-ul Influx filtrează pe tenant_id-ul userului curent.
+	val, err := influx.GetFieldForDevice(device, field, rangeStr, tc.TenantID, plan)
 	if err != nil {
 		log.Printf("❌ Influx error pentru %s/%s: %v", device, field, err)
 		http.Error(w, "Influx error: "+err.Error(), http.StatusInternalServerError)

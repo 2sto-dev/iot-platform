@@ -15,4 +15,7 @@ TOPIC_TEMPLATES = {
     "auto_detected": [
         "{serial}"
     ],
+    "sun2000": [
+        "/{serial}/+/+/telemetry",
+    ],
 }

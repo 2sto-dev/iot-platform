@@ -65,8 +65,16 @@ class MQTTAuthView(View):
                 return JsonResponse(_DENY)
             return JsonResponse(_ALLOW_SUPER)
 
-        # Device: exists in DB → allow. Password check deferred to Faza 3.1 credentials.
-        if username and Device.objects.filter(serial_number=username).exists():
+        # Device: lookup by serial_number; verify password hash if set (Faza 3.1).
+        # Hash gol = compat pentru device-uri vechi fără credentials rotate.
+        if username:
+            device = Device.objects.filter(serial_number=username).first()
+            if device is None:
+                return JsonResponse(_DENY)
+            if device.mqtt_password_hash:
+                from django.contrib.auth.hashers import check_password
+                if not check_password(password, device.mqtt_password_hash):
+                    return JsonResponse(_DENY)
             return JsonResponse(_ALLOW)
 
         return JsonResponse(_DENY)

@@ -34,6 +34,13 @@ func ParseLegacy(topic string) (serial, stream string, ok bool) {
 		return parts[1], "tele", true
 	case "zigbee2mqtt":
 		return parts[1], "zigbee", true
+	case "":
+		// Huawei SUN2000: /{serial}/{collector}/{device_sn}/telemetry
+		// Split produce parts[0]="" (leading slash), parts[1]=serial
+		if len(parts) >= 5 && parts[1] != "" && parts[len(parts)-1] == "telemetry" {
+			return parts[1], "telemetry", true
+		}
+		return "", "", false
 	}
 	return "", "", false
 }

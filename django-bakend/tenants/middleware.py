@@ -117,12 +117,23 @@ class TenantMiddleware:
                 status=403,
             )
 
-        tenant = _resolve_tenant(user_id, tenant_id)
-        if tenant is None:
-            return JsonResponse(
-                {"detail": "User has no active membership in the requested tenant."},
-                status=403,
-            )
+        # Service accounts (is_service=True in JWT) bypass membership check — just verify
+        # tenant exists and is active. Used for superusers logging into a specific tenant.
+        if claims.get("is_service"):
+            try:
+                tenant = Tenant.objects.get(pk=int(tenant_id), status=Tenant.Status.ACTIVE)
+            except (Tenant.DoesNotExist, TypeError, ValueError):
+                return JsonResponse(
+                    {"detail": "Tenant not found or inactive."},
+                    status=403,
+                )
+        else:
+            tenant = _resolve_tenant(user_id, tenant_id)
+            if tenant is None:
+                return JsonResponse(
+                    {"detail": "User has no active membership in the requested tenant."},
+                    status=403,
+                )
 
         request.tenant = tenant
         request.tenant_id = tenant.id

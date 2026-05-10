@@ -1,6 +1,7 @@
 # Secrets
 .env
 *.env.local
+kong/kong.yaml
 
 # Go
 go-iot-platform/bin/

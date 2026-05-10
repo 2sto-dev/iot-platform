@@ -69,33 +69,46 @@ func main() {
 		log.Println("bridge: REDIS_ADDR not set; fallback Django per-message (slower)")
 	}
 
-	broker := os.Getenv("MQTT_BROKER")
-	if broker == "" {
-		log.Fatal("bridge: MQTT_BROKER not set")
+	dstBroker := os.Getenv("MQTT_BROKER")
+	if dstBroker == "" {
+		log.Fatal("bridge: MQTT_BROKER (destination EMQX) not set")
 	}
+	// MQTT_BROKER_SRC: brokerul sursă (e.g. Mosquitto extern). Default = același cu MQTT_BROKER.
+	srcBroker := os.Getenv("MQTT_BROKER_SRC")
+	if srcBroker == "" {
+		srcBroker = dstBroker
+	}
+	srcUser := os.Getenv("MQTT_SRC_USER")
+	if srcUser == "" {
+		srcUser = os.Getenv("MQTT_USER")
+	}
+	srcPass := os.Getenv("MQTT_SRC_PASS")
+	if srcPass == "" {
+		srcPass = os.Getenv("MQTT_PASS")
+	}
+
 	clientID := os.Getenv("MQTT_BRIDGE_CLIENT_ID")
 	if clientID == "" {
 		clientID = fmt.Sprintf("mqtt-bridge-%d", time.Now().UnixNano())
 	}
 
-	pubClient := newMQTTClient(broker, clientID+"-pub",
+	// Pub client → destination (EMQX)
+	pubClient := newMQTTClient(dstBroker, clientID+"-pub",
 		os.Getenv("MQTT_USER"), os.Getenv("MQTT_PASS"))
 	if token := pubClient.Connect(); token.Wait() && token.Error() != nil {
 		log.Fatalf("bridge: pub connect: %v", token.Error())
 	}
 	defer pubClient.Disconnect(500)
 
-	legacyTopics := []string{
-		"$share/bridge/shellies/+/#",
-		"$share/bridge/tele/+/#",
-		"$share/bridge/zigbee2mqtt/+",
-	}
+	// Topicuri pe brokerul sursă. Dacă sursa e Mosquitto (nu EMQX) nu folosim $share/.
+	useSrcShared := srcBroker == dstBroker
+	legacyTopics := buildSubTopics(useSrcShared)
 
 	opts := mqtt.NewClientOptions()
-	opts.AddBroker(broker)
+	opts.AddBroker(srcBroker)
 	opts.SetClientID(clientID + "-sub")
-	opts.SetUsername(os.Getenv("MQTT_USER"))
-	opts.SetPassword(os.Getenv("MQTT_PASS"))
+	opts.SetUsername(srcUser)
+	opts.SetPassword(srcPass)
 	opts.SetCleanSession(true)
 	opts.SetAutoReconnect(true)
 	opts.SetMaxReconnectInterval(30 * time.Second)
@@ -120,6 +133,26 @@ func main() {
 	log.Println("bridge: running — Ctrl-C to stop")
 	<-ctx.Done()
 	log.Println("bridge: shutting down")
+}
+
+// buildSubTopics returnează lista de topicuri pentru subscriber.
+// Dacă sursa e același broker cu destinația (EMQX), folosim $share/ pentru load-balancing.
+// Dacă sursa e un broker extern (Mosquitto), subscripții directe fără $share/.
+func buildSubTopics(shared bool) []string {
+	if shared {
+		return []string{
+			"$share/bridge/shellies/+/#",
+			"$share/bridge/tele/+/#",
+			"$share/bridge/zigbee2mqtt/+",
+			"$share/bridge//+/+/+/telemetry",
+		}
+	}
+	return []string{
+		"shellies/+/#",
+		"tele/+/#",
+		"zigbee2mqtt/+",
+		"/+/+/+/telemetry",
+	}
 }
 
 func newMQTTClient(broker, clientID, user, pass string) mqtt.Client {

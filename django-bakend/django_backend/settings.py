@@ -14,6 +14,7 @@ ALLOWED_HOSTS = config("DJANGO_ALLOWED_HOSTS", cast=Csv())
 
 # 📦 Apps
 INSTALLED_APPS = [
+    "corsheaders",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -21,11 +22,19 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "drf_spectacular",
     "clients",
     "tenants",
+    "provisioning",
+    "ota",
+    "audit",
+    "api_keys",
+    "rules",
+    "notifications",
 ]
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -34,6 +43,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "tenants.middleware.TenantMiddleware",
+    "audit.middleware.AuditMiddleware",
 ]
 
 ROOT_URLCONF = "django_backend.urls"
@@ -68,6 +78,12 @@ DATABASES = {
     }
 }
 
+# 🔐 Password hashers — bcrypt pentru mqtt_password_hash pe Device (Faza 3.1)
+PASSWORD_HASHERS = [
+    "django.contrib.auth.hashers.PBKDF2PasswordHasher",  # default pt. user passwords
+    "django.contrib.auth.hashers.BCryptSHA256PasswordHasher",  # pt. device MQTT passwords
+]
+
 # 🔐 Password validation
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -85,8 +101,18 @@ AUTH_USER_MODEL = "clients.Client"
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "api_keys.authentication.APIKeyAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+# 📖 OpenAPI spec (drf-spectacular)
+SPECTACULAR_SETTINGS = {
+    "TITLE": "IoT Platform API",
+    "DESCRIPTION": "REST API for IoT device management, telemetry, and control.",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
 }
 
 # 🌍 Internationalization
@@ -114,7 +140,21 @@ SIMPLE_JWT = {
 # Util pentru rollback de urgență fără rollback de migrare DB.
 MULTI_TENANT_ENABLED = config("MULTI_TENANT_ENABLED", default=True, cast=bool)
 
+# Faza 3.4: MQTT broker pentru shadow delta push (retained messages).
+# Format: "tcp://host:port" sau "host:port". Gol = publisher dezactivat (no-op).
+MQTT_BROKER = config("MQTT_BROKER", default="")
+MQTT_SERVICE_USER = config("DJANGO_SERVICE_USER", default="")
+MQTT_SERVICE_PASS = config("DJANGO_SERVICE_PASS", default="")
+
 # Faza 2.4: Redis pentru cache device→tenant invalidation pub/sub.
 # Format URL: redis://[:password]@host:port/db (vezi clients/signals.py).
 # Opțional: dacă lipsește, signals devin no-op și Go-ul cade pe fallback Django per-message.
 REDIS_URL = config("REDIS_URL", default="")
+
+# CORS — permite dashboard React în dev (Vite pe :5173)
+CORS_ALLOWED_ORIGINS = config(
+    "CORS_ALLOWED_ORIGINS",
+    default="http://localhost:5173",
+    cast=Csv(),
+)
+CORS_ALLOW_CREDENTIALS = True

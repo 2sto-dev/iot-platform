@@ -142,10 +142,12 @@ func GetAllDevices() ([]Device, error) {
 	return devs, nil
 }
 
-// 📥 Device-urile unui user în cadrul unui tenant (filtrare server-side via ?username=&tenant=)
+// 📥 Device-urile dintr-un tenant (Django scope-uiește la tenant prin middleware sau ?tenant= pentru service accounts).
+// NOTĂ: nu mai filtrăm pe username — orice user cu rol în tenant vede toate device-urile tenantului.
 func GetDevicesForUserInTenant(username string, tenantID int64) ([]Device, error) {
+	_ = username
 	client := &http.Client{Timeout: 5 * time.Second}
-	url := fmt.Sprintf("%s/devices/?username=%s&tenant=%d", baseURL, username, tenantID)
+	url := fmt.Sprintf("%s/devices/?tenant=%d", baseURL, tenantID)
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
@@ -177,6 +179,141 @@ func GetDevicesForUserInTenant(username string, tenantID int64) ([]Device, error
 		return nil, err
 	}
 	return devs, nil
+}
+
+// AckCommand actualizează statusul unei comenzi downlink (sent/executed/failed).
+func AckCommand(cmdID int64, status string, result map[string]interface{}) error {
+	client := &http.Client{Timeout: 5 * time.Second}
+	body, _ := json.Marshal(map[string]interface{}{
+		"status": status,
+		"result": result,
+	})
+	url := fmt.Sprintf("%s/devices/commands/%d/ack/", baseURL, cmdID)
+	req, _ := http.NewRequest("PATCH", url, bytes.NewBuffer(body))
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		if err := Refresh(); err != nil {
+			return err
+		}
+		req2, _ := http.NewRequest("PATCH", url, bytes.NewBuffer(body))
+		req2.Header.Set("Authorization", "Bearer "+accessToken)
+		req2.Header.Set("Content-Type", "application/json")
+		resp2, err := client.Do(req2)
+		if err != nil {
+			return err
+		}
+		defer resp2.Body.Close()
+		if resp2.StatusCode != http.StatusOK {
+			data, _ := io.ReadAll(resp2.Body)
+			return fmt.Errorf("ack command %d failed (%d): %s", cmdID, resp2.StatusCode, string(data))
+		}
+		return nil
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("ack command %d failed (%d): %s", cmdID, resp.StatusCode, string(data))
+	}
+	return nil
+}
+
+// UpdateShadowReported actualizează starea raportată a unui device în shadow.
+// Apelat de Go worker după ce device-ul publică pe /up/shadow.
+// Django lookup by serial number via PATCH /api/shadow/reported/?serial=<serial>.
+func UpdateShadowReported(serial string, reported map[string]interface{}) error {
+	client := &http.Client{Timeout: 5 * time.Second}
+	body, _ := json.Marshal(map[string]interface{}{
+		"reported": reported,
+	})
+	url := fmt.Sprintf("%s/shadow/reported/?serial=%s", baseURL, serial)
+	req, _ := http.NewRequest("PATCH", url, bytes.NewBuffer(body))
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		if err := Refresh(); err != nil {
+			return err
+		}
+		req2, _ := http.NewRequest("PATCH", url, bytes.NewBuffer(body))
+		req2.Header.Set("Authorization", "Bearer "+accessToken)
+		req2.Header.Set("Content-Type", "application/json")
+		resp2, err := client.Do(req2)
+		if err != nil {
+			return err
+		}
+		defer resp2.Body.Close()
+		if resp2.StatusCode != http.StatusOK && resp2.StatusCode != http.StatusNoContent {
+			data, _ := io.ReadAll(resp2.Body)
+			return fmt.Errorf("update shadow reported for %s failed (%d): %s", serial, resp2.StatusCode, string(data))
+		}
+		return nil
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		data, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("update shadow reported for %s failed (%d): %s", serial, resp.StatusCode, string(data))
+	}
+	return nil
+}
+
+// UpdateOTAStatus raportează statusul OTA al unui device la Django.
+// Apelat de Go worker după ce device-ul publică pe /up/ota.
+func UpdateOTAStatus(serial string, firmwareID int64, otaStatus string, errMsg string) error {
+	client := &http.Client{Timeout: 5 * time.Second}
+	body, _ := json.Marshal(map[string]interface{}{
+		"firmware_id":   firmwareID,
+		"status":        otaStatus,
+		"error_message": errMsg,
+	})
+	url := fmt.Sprintf("%s/ota/devices/%s/status/", baseURL, serial)
+	req, _ := http.NewRequest("PATCH", url, bytes.NewBuffer(body))
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		if err := Refresh(); err != nil {
+			return err
+		}
+		req2, _ := http.NewRequest("PATCH", url, bytes.NewBuffer(body))
+		req2.Header.Set("Authorization", "Bearer "+accessToken)
+		req2.Header.Set("Content-Type", "application/json")
+		resp2, err := client.Do(req2)
+		if err != nil {
+			return err
+		}
+		defer resp2.Body.Close()
+		if resp2.StatusCode != http.StatusOK {
+			data, _ := io.ReadAll(resp2.Body)
+			return fmt.Errorf("update OTA status for %s failed (%d): %s", serial, resp2.StatusCode, string(data))
+		}
+		return nil
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("update OTA status for %s failed (%d): %s", serial, resp.StatusCode, string(data))
+	}
+	return nil
 }
 
 // 🆕 Înregistrare device automat
