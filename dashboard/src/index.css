@@ -1,20 +1,202 @@
 @import "tailwindcss";
 
-/* Warning pulse pentru carduri critice (ex: temperatura inverter / baterie peste threshold).
-   Background palpaie de la rose-50 la rose-200 + halo subtil rose, ca atentionare vizuala. */
+/* Warning pulse pentru carduri critice (ex: temperatura inverter / baterie peste threshold). */
 @keyframes pulse-warn {
   0%, 100% {
-    background-color: rgb(255 241 242); /* rose-50 */
-    border-color: rgb(254 205 211);     /* rose-200 */
+    background-color: rgb(255 241 242);
+    border-color: rgb(254 205 211);
     box-shadow: 0 0 0 0 rgb(225 29 72 / 0.35);
   }
   50% {
-    background-color: rgb(254 205 211); /* rose-200 */
-    border-color: rgb(251 113 133);     /* rose-400 */
+    background-color: rgb(254 205 211);
+    border-color: rgb(251 113 133);
     box-shadow: 0 0 0 6px rgb(225 29 72 / 0);
   }
 }
+.pulse-warn { animation: pulse-warn 1.6s ease-in-out infinite; }
 
-.pulse-warn {
-  animation: pulse-warn 1.6s ease-in-out infinite;
+/* ════════════════════════════════════════════════════════════════════════════
+   SOLAR NEON THEME — dark + fluorescent. Scope: .solar-neon
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* Background animat: radial gradient care pulsează lent + grid-uri subtile. */
+@keyframes neon-bg-pulse {
+  0%, 100% { background-position: 0% 0%, 100% 100%, 0 0; }
+  50%      { background-position: 30% 20%, 70% 80%, 40px 40px; }
+}
+@keyframes neon-glow-pulse {
+  0%, 100% { filter: drop-shadow(0 0 6px currentColor) drop-shadow(0 0 14px currentColor); opacity: 0.95; }
+  50%      { filter: drop-shadow(0 0 12px currentColor) drop-shadow(0 0 28px currentColor); opacity: 1; }
+}
+@keyframes neon-border-sweep {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+@keyframes scanline {
+  0%   { transform: translateY(-100%); opacity: 0; }
+  50%  { opacity: 0.6; }
+  100% { transform: translateY(100%); opacity: 0; }
+}
+@keyframes float-up {
+  0%   { transform: translateY(20px); opacity: 0; }
+  100% { transform: translateY(0);     opacity: 1; }
+}
+
+.solar-neon {
+  background:
+    radial-gradient(ellipse 80% 50% at 30% 0%, rgba(139, 92, 246, 0.18), transparent 60%),
+    radial-gradient(ellipse 70% 40% at 80% 100%, rgba(0, 240, 255, 0.12), transparent 60%),
+    linear-gradient(135deg, #05050f 0%, #0b0d1e 50%, #050810 100%);
+  background-size: 200% 200%, 200% 200%, 100% 100%;
+  animation: neon-bg-pulse 18s ease-in-out infinite;
+  min-height: 100vh;
+  padding: 1.5rem;
+  border-radius: 1rem;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Grid subtil fix pe deasupra background-ului — efect "matrix" */
+.solar-neon::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(rgba(0, 240, 255, 0.04) 1px, transparent 1px) 0 0 / 40px 40px,
+    linear-gradient(90deg, rgba(0, 240, 255, 0.04) 1px, transparent 1px) 0 0 / 40px 40px;
+  pointer-events: none;
+  mask-image: radial-gradient(ellipse 70% 50% at 50% 50%, black, transparent 80%);
+}
+
+/* Scanline subtil pe deasupra */
+.solar-neon::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg,
+    transparent 0%,
+    rgba(0, 240, 255, 0.08) 50%,
+    transparent 100%);
+  height: 80px;
+  animation: scanline 9s linear infinite;
+  pointer-events: none;
+}
+
+.solar-neon > * { position: relative; z-index: 1; }
+
+/* Overrides pentru componentele copil (InverterPanel, BatteryPanel, MetricCard,
+   gauges, etc.) — aceste utility-uri Tailwind sunt rescrise la dark+neon. */
+.solar-neon .bg-white {
+  background: rgba(13, 17, 38, 0.55) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.solar-neon .bg-gray-50         { background: rgba(13, 17, 38, 0.4) !important; }
+.solar-neon .bg-gray-100        { background: rgba(20, 25, 50, 0.6) !important; }
+.solar-neon .bg-amber-50        { background: rgba(253, 191, 58, 0.08) !important; }
+.solar-neon .bg-indigo-50       { background: rgba(139, 92, 246, 0.10) !important; }
+.solar-neon .bg-sky-50          { background: rgba(0, 240, 255, 0.08) !important; }
+.solar-neon .bg-emerald-50      { background: rgba(0, 255, 136, 0.08) !important; }
+.solar-neon .bg-rose-50         { background: rgba(255, 60, 142, 0.08) !important; }
+.solar-neon .bg-slate-50        { background: rgba(20, 25, 50, 0.5) !important; }
+.solar-neon .bg-gradient-to-b   { background: linear-gradient(to bottom, rgba(0, 240, 255, 0.05), rgba(13, 17, 38, 0.6)) !important; }
+
+.solar-neon .text-gray-900      { color: #f0f4ff !important; }
+.solar-neon .text-gray-800      { color: #e0e6ff !important; }
+.solar-neon .text-gray-700      { color: #c4cce8 !important; }
+.solar-neon .text-gray-600      { color: #8b95b8 !important; }
+.solar-neon .text-gray-500      { color: #6f7a99 !important; }
+.solar-neon .text-gray-400      { color: #5a6587 !important; }
+.solar-neon .text-gray-300      { color: #424a66 !important; }
+
+.solar-neon .text-amber-600,
+.solar-neon .text-amber-700,
+.solar-neon .text-amber-900     { color: #ffd166 !important; text-shadow: 0 0 8px rgba(253, 191, 58, 0.5); }
+.solar-neon .text-indigo-600,
+.solar-neon .text-indigo-700,
+.solar-neon .text-indigo-900    { color: #b794ff !important; text-shadow: 0 0 8px rgba(139, 92, 246, 0.5); }
+.solar-neon .text-sky-600,
+.solar-neon .text-sky-700,
+.solar-neon .text-sky-900       { color: #5bf2ff !important; text-shadow: 0 0 8px rgba(0, 240, 255, 0.5); }
+.solar-neon .text-emerald-600,
+.solar-neon .text-emerald-700   { color: #4dffaa !important; text-shadow: 0 0 8px rgba(0, 255, 136, 0.5); }
+.solar-neon .text-rose-500,
+.solar-neon .text-rose-600,
+.solar-neon .text-rose-700,
+.solar-neon .text-rose-900      { color: #ff6ba8 !important; text-shadow: 0 0 8px rgba(255, 60, 142, 0.5); }
+
+.solar-neon .border-gray-100,
+.solar-neon .border-gray-200,
+.solar-neon .border-gray-300    { border-color: rgba(0, 240, 255, 0.15) !important; }
+.solar-neon .border-amber-200   { border-color: rgba(253, 191, 58, 0.35) !important; box-shadow: 0 0 16px rgba(253, 191, 58, 0.12) inset; }
+.solar-neon .border-indigo-200  { border-color: rgba(139, 92, 246, 0.35) !important; box-shadow: 0 0 16px rgba(139, 92, 246, 0.12) inset; }
+.solar-neon .border-sky-200     { border-color: rgba(0, 240, 255, 0.35) !important; box-shadow: 0 0 16px rgba(0, 240, 255, 0.12) inset; }
+.solar-neon .border-rose-200    { border-color: rgba(255, 60, 142, 0.35) !important; box-shadow: 0 0 16px rgba(255, 60, 142, 0.12) inset; }
+
+/* Barele de accent (ex. SectionHeader) — neon glow */
+.solar-neon .bg-amber-500       { background: linear-gradient(180deg, #ffd166, #ff9500) !important; box-shadow: 0 0 12px rgba(253, 191, 58, 0.8), 0 0 24px rgba(253, 191, 58, 0.4); }
+.solar-neon .bg-indigo-500      { background: linear-gradient(180deg, #b794ff, #8b5cf6) !important; box-shadow: 0 0 12px rgba(139, 92, 246, 0.8), 0 0 24px rgba(139, 92, 246, 0.4); }
+.solar-neon .bg-sky-500         { background: linear-gradient(180deg, #5bf2ff, #00d4ff) !important; box-shadow: 0 0 12px rgba(0, 240, 255, 0.8), 0 0 24px rgba(0, 240, 255, 0.4); }
+.solar-neon .bg-rose-500        { background: linear-gradient(180deg, #ff6ba8, #ff2d6e) !important; box-shadow: 0 0 12px rgba(255, 60, 142, 0.8), 0 0 24px rgba(255, 60, 142, 0.4); }
+.solar-neon .bg-emerald-500     { background: linear-gradient(180deg, #4dffaa, #00ff88) !important; box-shadow: 0 0 12px rgba(0, 255, 136, 0.8), 0 0 24px rgba(0, 255, 136, 0.4); }
+.solar-neon .bg-slate-300       { background: rgba(80, 90, 120, 0.5) !important; }
+
+/* Input/select-uri în barul de header */
+.solar-neon select,
+.solar-neon input,
+.solar-neon button {
+  background: rgba(13, 17, 38, 0.7) !important;
+  border-color: rgba(0, 240, 255, 0.25) !important;
+  color: #e0e6ff !important;
+}
+.solar-neon select:focus,
+.solar-neon input:focus,
+.solar-neon button:focus {
+  outline: none;
+  border-color: rgba(0, 240, 255, 0.6) !important;
+  box-shadow: 0 0 0 3px rgba(0, 240, 255, 0.15);
+}
+.solar-neon select option { background: #0b0d1e; color: #e0e6ff; }
+
+/* Carduri animate la apariție */
+.solar-neon-card-in { animation: float-up 0.5s ease-out backwards; }
+
+/* Utility-uri neon dedicate (folosite direct în SolarPage) */
+.neon-section-header {
+  background: linear-gradient(135deg, rgba(13, 17, 38, 0.7), rgba(20, 25, 50, 0.5)) !important;
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 240, 255, 0.2);
+  position: relative;
+  overflow: hidden;
+}
+.neon-section-header::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(0, 240, 255, 0.08), transparent);
+  background-size: 200% 100%;
+  animation: neon-border-sweep 4s linear infinite;
+  pointer-events: none;
+}
+
+.neon-card-amber   { border: 1px solid rgba(253, 191, 58, 0.35); box-shadow: 0 0 20px rgba(253, 191, 58, 0.15), inset 0 0 30px rgba(253, 191, 58, 0.05); }
+.neon-card-indigo  { border: 1px solid rgba(139, 92, 246, 0.35); box-shadow: 0 0 20px rgba(139, 92, 246, 0.15), inset 0 0 30px rgba(139, 92, 246, 0.05); }
+.neon-card-cyan    { border: 1px solid rgba(0, 240, 255, 0.35);  box-shadow: 0 0 20px rgba(0, 240, 255, 0.15),  inset 0 0 30px rgba(0, 240, 255, 0.05); }
+.neon-card-magenta { border: 1px solid rgba(255, 60, 142, 0.4);  box-shadow: 0 0 24px rgba(255, 60, 142, 0.2),   inset 0 0 30px rgba(255, 60, 142, 0.06); }
+.neon-card-lime    { border: 1px solid rgba(0, 255, 136, 0.35);  box-shadow: 0 0 20px rgba(0, 255, 136, 0.15),   inset 0 0 30px rgba(0, 255, 136, 0.05); }
+
+.neon-glow-text { animation: neon-glow-pulse 2.4s ease-in-out infinite; }
+
+.neon-divider {
+  background: linear-gradient(90deg, transparent, rgba(0, 240, 255, 0.4), transparent);
+  height: 1px;
+}
+
+/* Live "pill" indicator (dot pulsator + ring) */
+.neon-live-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #00ff88;
+  box-shadow: 0 0 8px #00ff88, 0 0 16px #00ff88;
+  animation: neon-glow-pulse 1.4s ease-in-out infinite;
 }

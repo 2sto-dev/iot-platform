@@ -58,49 +58,69 @@ export function EnergyFlowDiagram({
   const grid = { x: 540, y: 330 };
   const house = { x: 320, y: 560 };
 
+  // Neon palette — fluorescent versions of the original colors
+  const COLOR_PV       = "#fdbf3a";  // golden neon
+  const COLOR_CHARGE   = "#b794ff";  // violet neon
+  const COLOR_DISCHARGE = "#4dffaa"; // lime neon
+  const COLOR_IMPORT   = "#ff3c8e";  // hot pink
+  const COLOR_EXPORT   = "#4dffaa";  // lime
+  const COLOR_HOUSE    = "#5bf2ff";  // cyan
+  const COLOR_IDLE     = "#3a4060";  // very dim
+
   return (
-    <div className="bg-gradient-to-b from-sky-50 to-white border border-gray-200 rounded-xl p-6">
+    <div className="rounded-xl p-6 neon-card-cyan" style={{ background: "linear-gradient(180deg, rgba(13, 17, 38, 0.7), rgba(7, 9, 22, 0.85))" }}>
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Energy Flow</h3>
-        <span className="text-[10px] text-gray-400 flex items-center gap-1">
-          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-          live
+        <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: "#5bf2ff" }}>Energy Flow</h3>
+        <span className="text-[10px] flex items-center gap-1.5" style={{ color: "#4dffaa" }}>
+          <span className="neon-live-dot" style={{ width: 6, height: 6 }} />
+          <span style={{ textShadow: "0 0 8px rgba(0, 255, 136, 0.5)" }}>LIVE</span>
         </span>
       </div>
 
       <svg viewBox="0 0 640 680" className="w-full" style={{ maxHeight: 620 }}>
         <defs>
-          {/* Drop shadow soft pentru cercuri */}
-          <filter id="node-shadow" x="-30%" y="-30%" width="160%" height="160%">
-            <feGaussianBlur in="SourceAlpha" stdDeviation="3" />
-            <feOffset dx="0" dy="3" result="offsetblur" />
-            <feComponentTransfer><feFuncA type="linear" slope="0.18" /></feComponentTransfer>
+          {/* Glow filter pentru noduri active (neon outer + inner glow) */}
+          <filter id="neon-glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="4" result="coloredBlur" />
             <feMerge>
-              <feMergeNode />
+              <feMergeNode in="coloredBlur" />
+              <feMergeNode in="coloredBlur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          {/* Glow strong pentru linii energie */}
+          <filter id="line-glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="2.5" result="coloredBlur" />
+            <feMerge>
+              <feMergeNode in="coloredBlur" />
               <feMergeNode in="SourceGraphic" />
             </feMerge>
           </filter>
 
-          {/* Halo lucios la node-uri active */}
+          {/* Halo radial pentru noduri active */}
           <radialGradient id="halo-amber" cx="50%" cy="50%" r="50%">
-            <stop offset="60%" stopColor="#f59e0b" stopOpacity="0" />
-            <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.18" />
+            <stop offset="40%" stopColor={COLOR_PV} stopOpacity="0" />
+            <stop offset="100%" stopColor={COLOR_PV} stopOpacity="0.35" />
           </radialGradient>
           <radialGradient id="halo-emerald" cx="50%" cy="50%" r="50%">
-            <stop offset="60%" stopColor="#10b981" stopOpacity="0" />
-            <stop offset="100%" stopColor="#10b981" stopOpacity="0.18" />
+            <stop offset="40%" stopColor={COLOR_DISCHARGE} stopOpacity="0" />
+            <stop offset="100%" stopColor={COLOR_DISCHARGE} stopOpacity="0.35" />
           </radialGradient>
           <radialGradient id="halo-indigo" cx="50%" cy="50%" r="50%">
-            <stop offset="60%" stopColor="#6366f1" stopOpacity="0" />
-            <stop offset="100%" stopColor="#6366f1" stopOpacity="0.18" />
+            <stop offset="40%" stopColor={COLOR_CHARGE} stopOpacity="0" />
+            <stop offset="100%" stopColor={COLOR_CHARGE} stopOpacity="0.35" />
           </radialGradient>
           <radialGradient id="halo-sky" cx="50%" cy="50%" r="50%">
-            <stop offset="60%" stopColor="#0ea5e9" stopOpacity="0" />
-            <stop offset="100%" stopColor="#0ea5e9" stopOpacity="0.18" />
+            <stop offset="40%" stopColor={COLOR_HOUSE} stopOpacity="0" />
+            <stop offset="100%" stopColor={COLOR_HOUSE} stopOpacity="0.35" />
+          </radialGradient>
+          <radialGradient id="halo-rose" cx="50%" cy="50%" r="50%">
+            <stop offset="40%" stopColor={COLOR_IMPORT} stopOpacity="0" />
+            <stop offset="100%" stopColor={COLOR_IMPORT} stopOpacity="0.35" />
           </radialGradient>
 
-          {/* Săgeți marker per culoare */}
-          {(["#f59e0b", "#10b981", "#6366f1", "#e11d48", "#0ea5e9", "#94a3b8"] as const).map((c) => (
+          {/* Săgeți marker per culoare neon */}
+          {([COLOR_PV, COLOR_DISCHARGE, COLOR_CHARGE, COLOR_IMPORT, COLOR_HOUSE, COLOR_IDLE] as const).map((c) => (
             <marker
               key={c}
               id={`flow-arrow-${c.slice(1)}`}
@@ -116,55 +136,56 @@ export function EnergyFlowDiagram({
           ))}
         </defs>
 
-        {/* ── Linii curbate (desenate primele, sub noduri) ─────────────── */}
-        {/* PV → centru (curbă subtilă spre centru) */}
+        {/* PV → centru */}
         <CurvedFlow
           from={{ x: pv.x, y: pv.y + nodeR }}
           to={{ x: cx, y: cy - 6 }}
           control={{ x: pv.x, y: cy - 80 }}
           active={pvActive}
-          color="#f59e0b"
+          color={COLOR_PV}
           dur={pvSpeed}
           reverse={false}
         />
-        {/* Battery ↔ centru (curbă orizontală) */}
+        {/* Battery ↔ centru */}
         <CurvedFlow
           from={{ x: battery.x + nodeR, y: battery.y }}
           to={{ x: cx - 8, y: cy }}
           control={{ x: cx - 80, y: battery.y }}
           active={charging || discharging}
-          color={discharging ? "#10b981" : "#6366f1"}
+          color={discharging ? COLOR_DISCHARGE : COLOR_CHARGE}
           dur={battSpeed}
           reverse={charging}
         />
-        {/* centru ↔ Grid (curbă orizontală) */}
+        {/* centru ↔ Grid */}
         <CurvedFlow
           from={{ x: cx + 8, y: cy }}
           to={{ x: grid.x - nodeR, y: grid.y }}
           control={{ x: cx + 80, y: grid.y }}
           active={importing || exporting}
-          color={exporting ? "#10b981" : "#e11d48"}
+          color={exporting ? COLOR_EXPORT : COLOR_IMPORT}
           dur={gridSpeed}
           reverse={importing}
         />
-        {/* centru → House (curbă subtilă în jos) */}
+        {/* centru → House */}
         <CurvedFlow
           from={{ x: cx, y: cy + 6 }}
           to={{ x: house.x, y: house.y - nodeR }}
           control={{ x: house.x, y: cy + 80 }}
           active={consuming}
-          color="#0ea5e9"
+          color={COLOR_HOUSE}
           dur={houseSpeed}
           reverse={false}
         />
 
-        {/* Punct central de convergență (subtil) */}
-        <circle cx={cx} cy={cy} r="3" fill="#cbd5e1" />
+        {/* Punct central — pulsator când există flux */}
+        <circle cx={cx} cy={cy} r="4" fill={COLOR_HOUSE} filter="url(#neon-glow)">
+          <animate attributeName="r" values="3;5;3" dur="2s" repeatCount="indefinite" />
+          <animate attributeName="opacity" values="0.6;1;0.6" dur="2s" repeatCount="indefinite" />
+        </circle>
 
-        {/* ── Noduri circulare ─────────────────────────────────────────── */}
         <CircleNode
           cx={pv.x} cy={pv.y} r={nodeR} ringW={ringW}
-          ringColor={pvActive ? "#f59e0b" : "#cbd5e1"}
+          ringColor={pvActive ? COLOR_PV : COLOR_IDLE}
           haloId={pvActive ? "halo-amber" : null}
           icon={<PvIcon />}
           value={pvPowerKw !== null ? `${pvPowerKw.toFixed(3)}` : "—"}
@@ -174,7 +195,7 @@ export function EnergyFlowDiagram({
 
         <CircleNode
           cx={battery.x} cy={battery.y} r={nodeR} ringW={ringW}
-          ringColor={charging ? "#6366f1" : discharging ? "#10b981" : "#cbd5e1"}
+          ringColor={charging ? COLOR_CHARGE : discharging ? COLOR_DISCHARGE : COLOR_IDLE}
           haloId={charging ? "halo-indigo" : discharging ? "halo-emerald" : null}
           icon={<BatteryIcon soc={batterySoc} />}
           value={batteryPowerKw !== null ? `${Math.abs(batteryPowerKw).toFixed(3)}` : "—"}
@@ -185,8 +206,8 @@ export function EnergyFlowDiagram({
 
         <CircleNode
           cx={grid.x} cy={grid.y} r={nodeR} ringW={ringW}
-          ringColor={exporting ? "#10b981" : importing ? "#e11d48" : "#cbd5e1"}
-          haloId={exporting ? "halo-emerald" : null}
+          ringColor={exporting ? COLOR_EXPORT : importing ? COLOR_IMPORT : COLOR_IDLE}
+          haloId={exporting ? "halo-emerald" : importing ? "halo-rose" : null}
           icon={<GridIcon />}
           value={gridPowerW !== null ? `${(Math.abs(gridPowerW) / 1000).toFixed(3)}` : "—"}
           unit="kW"
@@ -195,7 +216,7 @@ export function EnergyFlowDiagram({
 
         <CircleNode
           cx={house.x} cy={house.y} r={nodeR} ringW={ringW}
-          ringColor={consuming ? "#0ea5e9" : "#cbd5e1"}
+          ringColor={consuming ? COLOR_HOUSE : COLOR_IDLE}
           haloId={consuming ? "halo-sky" : null}
           icon={<HouseIcon />}
           value={houseLoadKw !== null ? `${houseLoadKw.toFixed(3)}` : "—"}
@@ -234,30 +255,45 @@ function CurvedFlow({
 
   return (
     <g>
+      {/* Underlay subtil pe dark theme */}
       <path
         d={underlay}
         fill="none"
-        stroke="#e2e8f0"
-        strokeWidth="3"
+        stroke="rgba(80, 90, 120, 0.25)"
+        strokeWidth="2"
         strokeLinecap="round"
       />
       {active && (
-        <path
-          d={path}
-          fill="none"
-          stroke={color}
-          strokeWidth="3"
-          strokeLinecap="round"
-          strokeDasharray="6 10"
-          markerEnd={`url(#flow-arrow-${color.slice(1)})`}
-        >
-          <animate
-            attributeName="stroke-dashoffset"
-            from="0" to="-32"
-            dur={`${dur}s`}
-            repeatCount="indefinite"
+        <>
+          {/* Halo larg blur sub linia activă */}
+          <path
+            d={path}
+            fill="none"
+            stroke={color}
+            strokeWidth="6"
+            strokeLinecap="round"
+            strokeOpacity="0.35"
+            filter="url(#line-glow)"
           />
-        </path>
+          {/* Linia neon principală cu dash animate */}
+          <path
+            d={path}
+            fill="none"
+            stroke={color}
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeDasharray="6 10"
+            markerEnd={`url(#flow-arrow-${color.slice(1)})`}
+            filter="url(#line-glow)"
+          >
+            <animate
+              attributeName="stroke-dashoffset"
+              from="0" to="-32"
+              dur={`${dur}s`}
+              repeatCount="indefinite"
+            />
+          </path>
+        </>
       )}
     </g>
   );
@@ -289,81 +325,92 @@ function CircleNode({
   const LABEL_FONT = 15;
 
   const isEmpty = value === "—";
+  const isActive = haloId !== null;
 
   return (
     <g>
-      {/* Halo glow când activ */}
+      {/* Halo glow extern când activ */}
       {haloId && (
-        <circle cx={cx} cy={cy} r={r + 16} fill={`url(#${haloId})`} pointerEvents="none" />
+        <circle cx={cx} cy={cy} r={r + 22} fill={`url(#${haloId})`} pointerEvents="none">
+          <animate attributeName="r" values={`${r + 16};${r + 26};${r + 16}`} dur="2.4s" repeatCount="indefinite" />
+        </circle>
       )}
-      {/* Cerc alb cu inel colorat + drop shadow */}
+      {/* Cerc dark cu inel neon */}
       <circle
         cx={cx} cy={cy} r={r}
-        fill="white"
+        fill="rgba(13, 17, 38, 0.9)"
         stroke={ringColor}
         strokeWidth={ringW}
-        filter="url(#node-shadow)"
+        filter={isActive ? "url(#neon-glow)" : undefined}
       />
-      {/* Icon — sus, în culoarea inelului (currentColor inherit) */}
-      <g transform={`translate(${cx - 14}, ${cy + ICON_Y})`} style={{ color: ringColor }}>
+      {/* Inner ring subtle */}
+      <circle
+        cx={cx} cy={cy} r={r - 4}
+        fill="none"
+        stroke={ringColor}
+        strokeWidth="1"
+        strokeOpacity="0.3"
+      />
+      {/* Icon — sus, în culoarea inelului */}
+      <g transform={`translate(${cx - 14}, ${cy + ICON_Y})`} style={{ color: ringColor, filter: isActive ? `drop-shadow(0 0 6px ${ringColor})` : undefined }}>
         {icon}
       </g>
-      {/* Value (mare, bold) */}
+      {/* Value */}
       <text
         x={cx} y={cy + VALUE_Y}
         textAnchor="middle"
         fontSize={VALUE_FONT}
         fontWeight="800"
-        fill={isEmpty ? "#cbd5e1" : "#0f172a"}
-        fontFamily="ui-sans-serif, system-ui"
-        style={{ letterSpacing: "-0.5px" }}
+        fill={isEmpty ? "#5a6587" : isActive ? ringColor : "#e0e6ff"}
+        fontFamily="ui-monospace, monospace"
+        style={{ letterSpacing: "-0.5px", filter: isActive && !isEmpty ? `drop-shadow(0 0 6px ${ringColor})` : undefined }}
       >
         {value}
       </text>
-      {/* Unit (sub value) */}
+      {/* Unit */}
       <text
         x={cx} y={cy + UNIT_Y}
         textAnchor="middle"
         fontSize={UNIT_FONT}
-        fill="#64748b"
+        fill="#8b95b8"
         fontWeight="600"
         fontFamily="ui-sans-serif"
         style={{ letterSpacing: "0.5px" }}
       >
         {unit}
       </text>
-      {/* Badge SOC (overlay pe inelul de sus al cercului Battery) */}
+      {/* Badge SOC */}
       {badge && (
         <g>
           <rect
             x={cx - 24} y={cy - r - 12}
             width="48" height="22" rx="11"
             fill={ringColor}
-            stroke="white" strokeWidth="2"
-            filter="url(#node-shadow)"
+            stroke="rgba(13, 17, 38, 0.9)" strokeWidth="2"
+            filter={isActive ? "url(#neon-glow)" : undefined}
           />
           <text
             x={cx} y={cy - r + 3}
             textAnchor="middle"
             fontSize="12"
             fontWeight="800"
-            fill="white"
-            fontFamily="ui-sans-serif"
+            fill="#0b0d1e"
+            fontFamily="ui-monospace, monospace"
             style={{ letterSpacing: "0.3px" }}
           >
             {badge}
           </text>
         </g>
       )}
-      {/* Label sub cerc — uppercase pentru lizibilitate */}
+      {/* Label sub cerc */}
       <text
         x={cx} y={cy + r + LABEL_Y_OFFSET}
         textAnchor="middle"
         fontSize={LABEL_FONT}
         fontWeight="700"
-        fill="#334155"
+        fill={isActive ? ringColor : "#6f7a99"}
         fontFamily="ui-sans-serif"
-        style={{ letterSpacing: "0.8px" }}
+        style={{ letterSpacing: "0.8px", filter: isActive ? `drop-shadow(0 0 4px ${ringColor})` : undefined }}
       >
         {label.toUpperCase()}
       </text>

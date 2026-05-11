@@ -26,11 +26,11 @@ const SUMMARY_FIELDS = [
 
 type SectionTone = "amber" | "indigo" | "sky" | "rose";
 
-const SECTION_TONES: Record<SectionTone, { bar: string; bg: string; text: string; sub: string; border: string }> = {
-  amber:  { bar: "bg-amber-500",   bg: "bg-amber-50",   text: "text-amber-900",   sub: "text-amber-700",   border: "border-amber-200" },
-  indigo: { bar: "bg-indigo-500",  bg: "bg-indigo-50",  text: "text-indigo-900",  sub: "text-indigo-700",  border: "border-indigo-200" },
-  sky:    { bar: "bg-sky-500",     bg: "bg-sky-50",     text: "text-sky-900",     sub: "text-sky-700",     border: "border-sky-200" },
-  rose:   { bar: "bg-rose-500",    bg: "bg-rose-50",    text: "text-rose-900",    sub: "text-rose-700",    border: "border-rose-200" },
+const SECTION_TONES: Record<SectionTone, { bar: string; text: string; sub: string }> = {
+  amber:  { bar: "bg-amber-500",  text: "text-amber-900",  sub: "text-amber-700" },
+  indigo: { bar: "bg-indigo-500", text: "text-indigo-900", sub: "text-indigo-700" },
+  sky:    { bar: "bg-sky-500",    text: "text-sky-900",    sub: "text-sky-700" },
+  rose:   { bar: "bg-rose-500",   text: "text-rose-900",   sub: "text-rose-700" },
 };
 
 export default function SolarPage() {
@@ -61,11 +61,11 @@ export default function SolarPage() {
 
   if (devicesLoading) {
     return (
-      <div className="animate-pulse">
-        <div className="h-8 bg-gray-200 rounded w-48 mb-6"></div>
+      <div className="solar-neon animate-pulse">
+        <div className="h-8 w-48 mb-6 rounded bg-white/5"></div>
         <div className="grid grid-cols-2 gap-4">
           {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-24 bg-gray-100 rounded-xl"></div>
+            <div key={i} className="h-24 rounded-xl bg-white/5"></div>
           ))}
         </div>
       </div>
@@ -74,11 +74,11 @@ export default function SolarPage() {
 
   if (sun2000.length === 0) {
     return (
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">Solar</h1>
-        <p className="text-sm text-gray-500 mb-6">Huawei SUN2000 inverter monitoring.</p>
-        <div className="bg-white border border-amber-200 rounded-xl p-8 text-center">
-          <div className="inline-flex items-center justify-center w-12 h-12 bg-amber-50 rounded-full mb-3">
+      <div className="solar-neon">
+        <h1 className="text-3xl font-bold text-white mb-2 neon-glow-text" style={{ color: "#fdbf3a" }}>Solar</h1>
+        <p className="text-sm text-gray-400 mb-6">Huawei SUN2000 inverter monitoring.</p>
+        <div className="rounded-xl p-8 text-center neon-card-amber bg-white">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-full mb-3 bg-amber-50">
             <span className="text-xl">☀️</span>
           </div>
           <h3 className="text-base font-semibold text-gray-900 mb-1">No SUN2000 devices</h3>
@@ -89,20 +89,25 @@ export default function SolarPage() {
   }
 
   return (
-    <div className="max-w-[1400px]">
+    <div className="solar-neon max-w-[1400px]">
       {/* ──── Page header ─────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-end justify-between gap-4 mb-6 pb-4 border-b border-gray-200">
+      <div className="flex flex-wrap items-end justify-between gap-4 mb-6 pb-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Solar</h1>
-          <p className="text-sm text-gray-500 mt-1 flex items-center gap-2">
-            <span className="font-mono text-gray-700">{activeSerial}</span>
+          <h1
+            className="text-3xl font-bold tracking-tight neon-glow-text"
+            style={{ color: "#fdbf3a", textShadow: "0 0 12px rgba(253, 191, 58, 0.6), 0 0 28px rgba(253, 191, 58, 0.35)" }}
+          >
+            SOLAR
+          </h1>
+          <p className="text-sm mt-2 flex items-center gap-2 text-gray-500">
+            <span className="font-mono" style={{ color: "#5bf2ff" }}>{activeSerial}</span>
             <span className="text-gray-300">·</span>
             <span>Huawei SUN2000</span>
             <span className="text-gray-300">·</span>
             <span>last {RANGE_OPTIONS.find((r) => r.value === range)?.label}</span>
-            <span className="inline-flex items-center gap-1 text-emerald-600 ml-1">
-              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
-              live
+            <span className="inline-flex items-center gap-1.5 ml-2" style={{ color: "#4dffaa" }}>
+              <span className="neon-live-dot" />
+              <span style={{ textShadow: "0 0 8px rgba(0, 255, 136, 0.6)" }}>LIVE</span>
             </span>
           </p>
         </div>
@@ -111,7 +116,7 @@ export default function SolarPage() {
             <select
               value={activeSerial ?? ""}
               onChange={(e) => setSelectedSerial(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              className="rounded-lg px-3 py-2 text-sm shadow-sm"
             >
               {sun2000.map((d) => (
                 <option key={d.id} value={d.serial_number}>{d.serial_number}</option>
@@ -121,7 +126,7 @@ export default function SolarPage() {
           <select
             value={range}
             onChange={(e) => setRange(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            className="rounded-lg px-3 py-2 text-sm shadow-sm"
           >
             {RANGE_OPTIONS.map((r) => (
               <option key={r.value} value={r.value}>{r.label}</option>
@@ -130,7 +135,9 @@ export default function SolarPage() {
         </div>
       </div>
 
-      {/* ──── Live overview: animated diagram + 2 gauges ──────────────────── */}
+      <div className="neon-divider mb-6" />
+
+      {/* ──── Live overview ───────────────────────────────────────────────── */}
       <SectionHeader
         tone="amber"
         eyebrow="Live overview"
@@ -138,7 +145,7 @@ export default function SolarPage() {
         subtitle="Animated FusionSolar-style diagram + production / consumption gauges"
       />
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 solar-neon-card-in" style={{ animationDelay: "0.05s" }}>
           <EnergyFlowDiagram
             pvPowerKw={pvPower}
             gridPowerW={gridPower}
@@ -147,7 +154,7 @@ export default function SolarPage() {
             houseLoadKw={houseLoad}
           />
         </div>
-        <div className="space-y-4">
+        <div className="space-y-4 solar-neon-card-in" style={{ animationDelay: "0.15s" }}>
           <EnergyFlow
             pvKw={pvPower}
             gridW={gridPower}
@@ -180,7 +187,7 @@ export default function SolarPage() {
         title="Photovoltaic & Inverter"
         subtitle="DC strings, AC output, daily/total yield, alarms"
       />
-      <div className="mb-10">
+      <div className="mb-10 solar-neon-card-in" style={{ animationDelay: "0.25s" }}>
         {activeSerial && <InverterPanel deviceSerial={activeSerial} range={range} showHeroKpis={false} />}
       </div>
 
@@ -191,25 +198,26 @@ export default function SolarPage() {
         title="Battery"
         subtitle="State of charge, charge/discharge cycles, temperatures"
       />
-      <div className="mb-10">
+      <div className="mb-10 solar-neon-card-in" style={{ animationDelay: "0.35s" }}>
         {activeSerial && <BatteryPanel deviceSerial={activeSerial} range={range} />}
       </div>
 
       {/* ──── Footer status ───────────────────────────────────────────────── */}
-      <div className="text-xs text-gray-400 mt-8 pt-4 border-t border-gray-200 flex flex-wrap items-center gap-2">
-        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
-        Auto-refreshing every 5 seconds
-        <span className="text-gray-300">·</span>
+      <div className="neon-divider mb-4" />
+      <div className="text-xs mt-2 flex flex-wrap items-center gap-2" style={{ color: "#5a6587" }}>
+        <span className="neon-live-dot" style={{ width: 6, height: 6 }} />
+        <span>Auto-refreshing every 5 seconds</span>
+        <span>·</span>
         <span>Source: Go API → InfluxDB</span>
-        <span className="text-gray-300">·</span>
-        <span>Drag cards within sections to reorder</span>
+        <span>·</span>
+        <span style={{ color: "#3a4060" }}>Drag cards within sections to reorder</span>
       </div>
     </div>
   );
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Section header — accent colorat (bar vertical + eyebrow + title)
+// Section header — bar neon glowing + eyebrow + title
 // ──────────────────────────────────────────────────────────────────────────
 function SectionHeader({
   tone,
@@ -224,11 +232,11 @@ function SectionHeader({
 }) {
   const c = SECTION_TONES[tone];
   return (
-    <div className={`mb-5 flex items-center gap-4 px-5 py-4 rounded-xl border ${c.bg} ${c.border}`}>
+    <div className="mb-5 flex items-center gap-4 px-5 py-4 rounded-xl neon-section-header">
       <span className={`inline-block w-1 h-12 rounded-full ${c.bar}`} />
       <div className="flex-1">
-        <p className={`text-[10px] font-bold tracking-[0.15em] uppercase ${c.sub}`}>{eyebrow}</p>
-        <h2 className="text-lg font-bold text-gray-900 tracking-tight leading-tight">{title}</h2>
+        <p className={`text-[10px] font-bold tracking-[0.2em] uppercase ${c.sub}`}>{eyebrow}</p>
+        <h2 className={`text-lg font-bold tracking-tight leading-tight ${c.text}`}>{title}</h2>
         <p className="text-xs text-gray-600 mt-0.5">{subtitle}</p>
       </div>
     </div>
@@ -236,7 +244,7 @@ function SectionHeader({
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Energy flow card — listă pe verticală cu icoane semantice
+// Energy flow card — bilanț pe verticală cu icoane
 // ──────────────────────────────────────────────────────────────────────────
 type RowTone = "amber" | "indigo" | "emerald" | "rose" | "slate";
 
@@ -270,7 +278,6 @@ function SolarSvg() {
 }
 
 function GridSvg({ direction }: { direction: "import" | "export" | "idle" }) {
-  // tower with arrow indicator
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 2 L7 12 L10 12 L7 22 L17 22 L14 12 L17 12 Z" fill="currentColor" fillOpacity="0.15" />
@@ -306,7 +313,6 @@ function EnergyFlow({ pvKw, gridW, batteryKw, loadKw }: {
   batteryKw: number | null;
   loadKw: number | null;
 }) {
-  // Convenție Huawei SUN2000: grid_power > 0 = EXPORT, < 0 = IMPORT.
   const pvOn = pvKw !== null && pvKw > 0.05;
   const exporting = gridW !== null && gridW > 50;
   const importing = gridW !== null && gridW < -50;
@@ -320,6 +326,7 @@ function EnergyFlow({ pvKw, gridW, batteryKw, loadKw }: {
       label: "Solar production",
       value: pvKw !== null ? `${(pvKw * 1000).toFixed(0)} W` : "—",
       sub: pvKw !== null ? (pvOn ? "Generating" : "Inactive") : "—",
+      active: pvOn,
     },
     {
       icon: <GridSvg direction={importing ? "import" : exporting ? "export" : "idle"} />,
@@ -329,6 +336,7 @@ function EnergyFlow({ pvKw, gridW, batteryKw, loadKw }: {
       sub: gridW !== null
         ? (importing ? "Drawing from grid" : exporting ? "Selling to grid" : "Balanced")
         : "—",
+      active: importing || exporting,
     },
     {
       icon: <BatterySvg state={charging ? "charging" : discharging ? "discharging" : "idle"} />,
@@ -338,12 +346,15 @@ function EnergyFlow({ pvKw, gridW, batteryKw, loadKw }: {
       sub: batteryKw !== null
         ? (charging ? "Storing energy" : discharging ? "Delivering power" : "Idle")
         : "—",
+      active: charging || discharging,
     },
   ];
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-6">
-      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Bilanțul Energetic</h3>
+    <div className="bg-white rounded-xl p-6 neon-card-cyan">
+      <h3 className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: "#5bf2ff" }}>
+        Energy Balance
+      </h3>
       <div className="space-y-1">
         {rows.map((r, i) => (
           <div key={i} className="flex items-center justify-between py-2.5 border-b border-gray-100 last:border-0">
@@ -354,7 +365,12 @@ function EnergyFlow({ pvKw, gridW, batteryKw, loadKw }: {
                 <p className="text-[11px] text-gray-500 truncate">{r.sub}</p>
               </div>
             </div>
-            <span className="font-semibold text-gray-900 tabular-nums text-base ml-2 flex-shrink-0">{r.value}</span>
+            <span
+              className={`font-semibold tabular-nums text-base ml-2 flex-shrink-0 ${r.active ? "neon-glow-text" : ""}`}
+              style={r.active ? { color: r.tone === "amber" ? "#ffd166" : r.tone === "indigo" ? "#b794ff" : r.tone === "emerald" ? "#4dffaa" : r.tone === "rose" ? "#ff6ba8" : "#e0e6ff" } : { color: "#e0e6ff" }}
+            >
+              {r.value}
+            </span>
           </div>
         ))}
         <div className="flex items-center justify-between pt-4 mt-1 border-t-2 border-gray-200">
@@ -365,7 +381,10 @@ function EnergyFlow({ pvKw, gridW, batteryKw, loadKw }: {
               <p className="text-[11px] text-gray-500">Total consumption</p>
             </div>
           </div>
-          <span className="font-bold text-gray-900 tabular-nums text-lg ml-2 flex-shrink-0">
+          <span
+            className="font-bold tabular-nums text-lg ml-2 flex-shrink-0 neon-glow-text"
+            style={{ color: "#ff6ba8" }}
+          >
             {loadKw !== null ? `${(loadKw * 1000).toFixed(0)} W` : "—"}
           </span>
         </div>
@@ -375,7 +394,7 @@ function EnergyFlow({ pvKw, gridW, batteryKw, loadKw }: {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// TemperatureCard — mini-card cu icon + temp + bar colorat + status
+// TemperatureCard
 // ──────────────────────────────────────────────────────────────────────────
 function TemperatureCard({
   label, value, warmAt, hotAt, icon,
@@ -396,36 +415,65 @@ function TemperatureCard({
     : value >= hotAt ? "Hot"
     : value >= warmAt ? "Warm"
     : "Normal";
-  // Pct on a 0-80°C visual scale (clamped) — pentru bara de jos
   const pct = value === null ? 0 : Math.max(0, Math.min(1, value / 80));
-  const t = ROW_TONES[tone];
   const isHot = tone === "rose";
 
-  // Cardul palpaie cu bg rose cand temperatura e in zona Hot — atentionare vizuala.
+  const neonClass =
+    tone === "emerald" ? "neon-card-lime" :
+    tone === "amber"   ? "neon-card-amber" :
+    tone === "rose"    ? "neon-card-magenta" :
+                         "neon-card-cyan";
+
   const cardClass = isHot
-    ? "pulse-warn rounded-xl border p-4"
-    : "bg-white border border-gray-200 rounded-xl p-4";
+    ? `pulse-warn rounded-xl p-4`
+    : `bg-white rounded-xl p-4 ${neonClass}`;
+
+  const valueColor =
+    value === null ? "#5a6587" :
+    isHot ? "#ff6ba8" :
+    tone === "amber" ? "#ffd166" :
+    tone === "emerald" ? "#4dffaa" : "#e0e6ff";
 
   return (
     <div className={cardClass}>
       <div className="flex items-center gap-3">
         <IconBubble tone={tone}>{icon}</IconBubble>
         <div className="flex-1 min-w-0">
-          <p className={`text-[11px] font-semibold uppercase tracking-wider ${isHot ? "text-rose-700" : "text-gray-500"}`}>{label}</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">{label}</p>
           <p className="flex items-baseline gap-1 mt-0.5">
-            <span className={`text-xl font-bold tabular-nums ${value === null ? "text-gray-300" : isHot ? "text-rose-900" : "text-gray-900"}`}>
+            <span
+              className="text-xl font-bold tabular-nums neon-glow-text"
+              style={{ color: valueColor }}
+            >
               {value !== null ? value.toFixed(1) : "—"}
             </span>
-            <span className={`text-xs font-medium ${isHot ? "text-rose-600" : "text-gray-500"}`}>°C</span>
+            <span className="text-xs font-medium text-gray-500">°C</span>
           </p>
         </div>
-        <span className={`text-[10px] font-bold ${isHot ? "text-rose-700 animate-pulse" : t.text}`}>{status}</span>
+        <span
+          className="text-[10px] font-bold"
+          style={{ color: valueColor, textShadow: isHot ? "0 0 8px rgba(255, 60, 142, 0.6)" : undefined }}
+        >
+          {status}
+        </span>
       </div>
       {value !== null && (
-        <div className="mt-3 h-1 bg-gray-100 rounded-full overflow-hidden">
+        <div className="mt-3 h-1.5 bg-gray-100 rounded-full overflow-hidden">
           <div
-            className={`h-full ${tone === "emerald" ? "bg-emerald-500" : tone === "amber" ? "bg-amber-500" : tone === "rose" ? "bg-rose-500" : "bg-slate-300"} transition-all`}
-            style={{ width: `${pct * 100}%` }}
+            className="h-full transition-all"
+            style={{
+              width: `${pct * 100}%`,
+              background:
+                tone === "emerald" ? "linear-gradient(90deg, #4dffaa, #00ff88)" :
+                tone === "amber"   ? "linear-gradient(90deg, #ffd166, #ff9500)" :
+                tone === "rose"    ? "linear-gradient(90deg, #ff6ba8, #ff2d6e)" :
+                                     "rgba(80, 90, 120, 0.5)",
+              boxShadow:
+                tone === "emerald" ? "0 0 8px rgba(0, 255, 136, 0.6)" :
+                tone === "amber"   ? "0 0 8px rgba(253, 191, 58, 0.6)" :
+                tone === "rose"    ? "0 0 8px rgba(255, 60, 142, 0.6)" :
+                                     "none",
+            }}
           />
         </div>
       )}
