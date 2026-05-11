@@ -38,11 +38,14 @@ def owner(db, tenant):
 
 @pytest.fixture
 def device(db, owner, tenant):
+    # Faza 3.1: device-urile au mqtt_password_hash obligatoriu (DENY fără).
+    from django.contrib.auth.hashers import make_password
     return Device.objects.create(
         client=owner,
         tenant=tenant,
         serial_number="SHELF001",
         device_type="shelly_em",
+        mqtt_password_hash=make_password("devpass", hasher="bcrypt_sha256"),
     )
 
 
@@ -65,7 +68,7 @@ def _acl(client, **body):
 # ── Auth endpoint ──────────────────────────────────────────────────────────────
 
 def test_auth_known_device_allowed(http, device):
-    r = _auth(http, username="SHELF001", password="")
+    r = _auth(http, username="SHELF001", password="devpass")
     assert r.status_code == 200
     assert r.json()["result"] == "allow"
     assert r.json().get("is_superuser") is not True
@@ -94,11 +97,11 @@ def test_auth_secret_enforced(http, device):
     original = mv._HOOK_SECRET
     mv._HOOK_SECRET = "supersecret"
     try:
-        r = _auth(http, username="SHELF001", password="")
+        r = _auth(http, username="SHELF001", password="devpass")
         assert r.status_code == 403
         r2 = http.post(
             "/api/mqtt/auth/",
-            data=json.dumps({"username": "SHELF001", "password": ""}),
+            data=json.dumps({"username": "SHELF001", "password": "devpass"}),
             content_type="application/json",
             HTTP_X_HOOK_SECRET="supersecret",
         )

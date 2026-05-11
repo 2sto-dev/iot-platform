@@ -124,14 +124,21 @@ def test_auth_with_wrong_password(http, device):
     assert r.json()["result"] == "deny"
 
 
-def test_auth_no_hash_still_allows(http, device):
-    # Device fără hash → compat mode, allow fără parolă
+def test_auth_no_hash_denies(http, device):
+    # Device fără hash → DENY (regression test: compat-mode-allow eliminată).
+    # Migrarea forțată trebuie făcută cu management command force_rotate_mqtt_credentials.
     assert device.mqtt_password_hash == ""
     r = _auth(http, username="SHELF001", password="")
-    assert r.json()["result"] == "allow"
+    assert r.json()["result"] == "deny"
 
 
-def test_auth_no_hash_allows_any_password(http, device):
-    # Fără hash, orice parolă e acceptată (device legacy)
+def test_auth_no_hash_denies_any_password(http, device):
+    # Fără hash, NICIO parolă nu trebuie acceptată — nici random, nici gol, nici "anything".
     r = _auth(http, username="SHELF001", password="anything")
-    assert r.json()["result"] == "allow"
+    assert r.json()["result"] == "deny"
+
+
+def test_auth_unknown_serial_denies(http, db):
+    # Defense-in-depth: serial inexistent → deny (același mesaj ca hash gol, nu leak existență).
+    r = _auth(http, username="DOES-NOT-EXIST", password="anything")
+    assert r.json()["result"] == "deny"

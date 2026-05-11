@@ -65,16 +65,19 @@ class MQTTAuthView(View):
                 return JsonResponse(_DENY)
             return JsonResponse(_ALLOW_SUPER)
 
-        # Device: lookup by serial_number; verify password hash if set (Faza 3.1).
-        # Hash gol = compat pentru device-uri vechi fără credentials rotate.
+        # Device: lookup by serial_number; bcrypt_sha256 hash obligatoriu (Faza 3.1).
+        # Device fără mqtt_password_hash = DENY (înainte de a publica trebuie să rulezi
+        # POST /api/devices/{id}/credentials/rotate/ sau management command
+        # `force_rotate_mqtt_credentials`).
         if username:
             device = Device.objects.filter(serial_number=username).first()
             if device is None:
                 return JsonResponse(_DENY)
-            if device.mqtt_password_hash:
-                from django.contrib.auth.hashers import check_password
-                if not check_password(password, device.mqtt_password_hash):
-                    return JsonResponse(_DENY)
+            if not device.mqtt_password_hash:
+                return JsonResponse(_DENY)
+            from django.contrib.auth.hashers import check_password
+            if not check_password(password, device.mqtt_password_hash):
+                return JsonResponse(_DENY)
             return JsonResponse(_ALLOW)
 
         return JsonResponse(_DENY)
