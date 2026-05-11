@@ -265,30 +265,39 @@ function CurvedFlow({
       />
       {active && (
         <>
-          {/* Halo larg blur sub linia activă */}
+          {/* Halo blur LARG static — efect neon glow în jurul liniei */}
           <path
             d={path}
             fill="none"
             stroke={color}
-            strokeWidth="6"
+            strokeWidth="9"
             strokeLinecap="round"
-            strokeOpacity="0.35"
+            strokeOpacity="0.20"
             filter="url(#line-glow)"
           />
-          {/* Linia neon principală cu dash animate */}
+          {/* Linie continuă subțire — sclipire constantă de bază */}
+          <path
+            d={path}
+            fill="none"
+            stroke={color}
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeOpacity="0.45"
+          />
+          {/* Linia animată cu dashes — CRISP (fără filter), vizibilă, direcțională */}
           <path
             d={path}
             fill="none"
             stroke={color}
             strokeWidth="3"
             strokeLinecap="round"
-            strokeDasharray="6 10"
+            strokeDasharray="8 14"
             markerEnd={`url(#flow-arrow-${color.slice(1)})`}
-            filter="url(#line-glow)"
+            style={{ filter: `drop-shadow(0 0 4px ${color})` }}
           >
             <animate
               attributeName="stroke-dashoffset"
-              from="0" to="-32"
+              from="0" to="-44"
               dur={`${dur}s`}
               repeatCount="indefinite"
             />
@@ -314,22 +323,21 @@ function CircleNode({
   label: string;
   badge?: string | null;
 }) {
-  // Typography spacing — cercul are r=72, conținut interior 144px diametru.
-  // Distribuim: icon (sus, ~y=-30), value (mare, y=+5), unit (y=+24).
-  const ICON_Y = -32;          // top of icon (translateY)
-  const VALUE_Y = 8;           // baseline value (relative to cy)
-  const UNIT_Y = 28;           // baseline unit
-  const LABEL_Y_OFFSET = 26;   // label distance under circle bottom
-  const VALUE_FONT = 22;       // mare, prominent
-  const UNIT_FONT = 12;
-  const LABEL_FONT = 15;
+  // Layout intern în cerc (r=72, diam 144px). 3 zone: icon sus, valoare centru, unit jos.
+  const ICON_CENTER_Y  = cy - 32;   // centru icon
+  const VALUE_CENTER_Y = cy + 4;    // centru valoare (ușor sub axa cercului)
+  const UNIT_CENTER_Y  = cy + 30;   // centru unit
+  const LABEL_CENTER_Y = cy + r + 28;
+  const VALUE_FONT = 24;
+  const UNIT_FONT  = 11;
+  const LABEL_FONT = 13;
 
   const isEmpty = value === "—";
   const isActive = haloId !== null;
 
   return (
     <g>
-      {/* Halo glow extern când activ */}
+      {/* Halo glow extern când activ — pulsator */}
       {haloId && (
         <circle cx={cx} cy={cy} r={r + 22} fill={`url(#${haloId})`} pointerEvents="none">
           <animate attributeName="r" values={`${r + 16};${r + 26};${r + 16}`} dur="2.4s" repeatCount="indefinite" />
@@ -338,64 +346,79 @@ function CircleNode({
       {/* Cerc dark cu inel neon */}
       <circle
         cx={cx} cy={cy} r={r}
-        fill="rgba(13, 17, 38, 0.9)"
+        fill="rgba(7, 9, 22, 0.92)"
         stroke={ringColor}
         strokeWidth={ringW}
         filter={isActive ? "url(#neon-glow)" : undefined}
       />
-      {/* Inner ring subtle */}
+      {/* Inner ring subtil */}
       <circle
-        cx={cx} cy={cy} r={r - 4}
+        cx={cx} cy={cy} r={r - 5}
         fill="none"
         stroke={ringColor}
         strokeWidth="1"
-        strokeOpacity="0.3"
+        strokeOpacity={isActive ? "0.35" : "0.15"}
       />
-      {/* Icon — sus, în culoarea inelului */}
-      <g transform={`translate(${cx - 14}, ${cy + ICON_Y})`} style={{ color: ringColor, filter: isActive ? `drop-shadow(0 0 6px ${ringColor})` : undefined }}>
+      {/* Icon centrat vertical pe ICON_CENTER_Y */}
+      <g
+        transform={`translate(${cx - 12}, ${ICON_CENTER_Y - 12})`}
+        style={{
+          color: ringColor,
+          filter: isActive ? `drop-shadow(0 0 6px ${ringColor})` : undefined,
+        }}
+      >
         {icon}
       </g>
-      {/* Value */}
+      {/* Value — dominantBaseline central pentru aliniere fără magic offset */}
       <text
-        x={cx} y={cy + VALUE_Y}
+        x={cx}
+        y={VALUE_CENTER_Y}
         textAnchor="middle"
+        dominantBaseline="central"
         fontSize={VALUE_FONT}
         fontWeight="800"
         fill={isEmpty ? "#5a6587" : isActive ? ringColor : "#e0e6ff"}
-        fontFamily="ui-monospace, monospace"
-        style={{ letterSpacing: "-0.5px", filter: isActive && !isEmpty ? `drop-shadow(0 0 6px ${ringColor})` : undefined }}
+        fontFamily='"JetBrains Mono", "Fira Code", ui-monospace, monospace'
+        style={{
+          letterSpacing: "-0.3px",
+          filter: isActive && !isEmpty ? `drop-shadow(0 0 8px ${ringColor})` : undefined,
+        }}
       >
         {value}
       </text>
       {/* Unit */}
       <text
-        x={cx} y={cy + UNIT_Y}
+        x={cx}
+        y={UNIT_CENTER_Y}
         textAnchor="middle"
+        dominantBaseline="central"
         fontSize={UNIT_FONT}
         fill="#8b95b8"
         fontWeight="600"
-        fontFamily="ui-sans-serif"
-        style={{ letterSpacing: "0.5px" }}
+        fontFamily="ui-sans-serif, system-ui"
+        style={{ letterSpacing: "1.2px" }}
       >
-        {unit}
+        {unit.toUpperCase()}
       </text>
-      {/* Badge SOC */}
+      {/* Badge SOC peste ringul de sus */}
       {badge && (
         <g>
           <rect
-            x={cx - 24} y={cy - r - 12}
-            width="48" height="22" rx="11"
+            x={cx - 26} y={cy - r - 13}
+            width="52" height="24" rx="12"
             fill={ringColor}
-            stroke="rgba(13, 17, 38, 0.9)" strokeWidth="2"
+            stroke="rgba(7, 9, 22, 0.95)" strokeWidth="2"
             filter={isActive ? "url(#neon-glow)" : undefined}
           />
           <text
-            x={cx} y={cy - r + 3}
+            x={cx}
+            y={cy - r - 1}
             textAnchor="middle"
+            dominantBaseline="central"
             fontSize="12"
             fontWeight="800"
-            fill="#0b0d1e"
-            fontFamily="ui-monospace, monospace"
+            fill="#07091a"
+            fontFamily="ui-sans-serif, system-ui"
             style={{ letterSpacing: "0.3px" }}
           >
             {badge}
@@ -404,13 +427,18 @@ function CircleNode({
       )}
       {/* Label sub cerc */}
       <text
-        x={cx} y={cy + r + LABEL_Y_OFFSET}
+        x={cx}
+        y={LABEL_CENTER_Y}
         textAnchor="middle"
+        dominantBaseline="central"
         fontSize={LABEL_FONT}
         fontWeight="700"
         fill={isActive ? ringColor : "#6f7a99"}
-        fontFamily="ui-sans-serif"
-        style={{ letterSpacing: "0.8px", filter: isActive ? `drop-shadow(0 0 4px ${ringColor})` : undefined }}
+        fontFamily="ui-sans-serif, system-ui"
+        style={{
+          letterSpacing: "2px",
+          filter: isActive ? `drop-shadow(0 0 4px ${ringColor})` : undefined,
+        }}
       >
         {label.toUpperCase()}
       </text>
