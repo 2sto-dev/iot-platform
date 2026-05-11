@@ -148,7 +148,7 @@ services:
         strip_path: false
 
   # ── Go API (JWT validat de Kong; Go re-decodează pentru tenant_id) ──────────
-  # strip_path: true => upstream primește /runtime, /metrics/... (Go mux nu are prefix /go)
+  # strip_path: false — Go-ul așteaptă URL-uri cu prefix /go (StripPrefix în main.go).
   # Authorization header e propagat by default => Go-ul re-validează JWT cu același secret.
   - name: go-api
     url: http://172.16.0.105:8090
@@ -156,7 +156,7 @@ services:
       - name: go-api-route
         paths:
           - /go
-        strip_path: true
+        strip_path: false
         plugins:
           - name: jwt
             config:
