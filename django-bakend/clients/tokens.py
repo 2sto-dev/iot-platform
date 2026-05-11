@@ -29,11 +29,13 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                     raise serializers.ValidationError(
                         {"tenant_slug": f"Tenant '{requested}' not found or inactive."}
                     )
+                # Nu mai includem `is_service` în JWT — middleware-ul derivă privilegiul
+                # server-side din `user.is_superuser` la fiecare request, ca să nu expunem
+                # bit-ul de admin în browser (XSS exfil risk).
                 refresh = self.get_token(self.user)
                 refresh["tenant_id"] = tenant.id
                 refresh["tenant_slug"] = tenant.slug
                 refresh["role"] = "OWNER"
-                refresh["is_service"] = True
                 return {
                     "refresh": str(refresh),
                     "access": str(refresh.access_token),

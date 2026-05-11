@@ -10,13 +10,45 @@ import time
 
 import jwt
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.http import JsonResponse
 
 from .models import Membership, Tenant
 
 
 _membership_cache = {}  # (user_id, tenant_id) -> (Tenant or None, expires_at_ts)
+_superuser_cache = {}   # user_id -> (is_superuser_bool, expires_at_ts)
 _CACHE_TTL = 60  # seconds
+
+
+def _is_superuser(user_id):
+    """Return True if user is Django superuser. Cached pe TTL ca să evităm hit DB."""
+    if user_id is None:
+        return False
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return False
+    now = time.monotonic()
+    cached = _superuser_cache.get(user_id)
+    if cached and cached[1] > now:
+        return cached[0]
+    User = get_user_model()
+    flag = User.objects.filter(pk=user_id, is_superuser=True, is_active=True).exists()
+    _superuser_cache[user_id] = (flag, now + _CACHE_TTL)
+    return flag
+
+
+def invalidate_superuser_cache(user_id=None):
+    """Chemat de Django signals când un user își schimbă is_superuser/is_active."""
+    if user_id is None:
+        _superuser_cache.clear()
+        return
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return
+    _superuser_cache.pop(user_id, None)
 
 
 def _resolve_tenant(user_id, tenant_id):
@@ -117,9 +149,10 @@ class TenantMiddleware:
                 status=403,
             )
 
-        # Service accounts (is_service=True in JWT) bypass membership check — just verify
-        # tenant exists and is active. Used for superusers logging into a specific tenant.
-        if claims.get("is_service"):
+        # Service accounts: bypass membership check pentru superuseri Django activi.
+        # Privilegiul e re-verificat la FIECARE request din DB (cu cache TTL) — nu mai
+        # trăiește în JWT, deci XSS nu poate exfiltra un token cu admin bit.
+        if _is_superuser(user_id):
             try:
                 tenant = Tenant.objects.get(pk=int(tenant_id), status=Tenant.Status.ACTIVE)
             except (Tenant.DoesNotExist, TypeError, ValueError):

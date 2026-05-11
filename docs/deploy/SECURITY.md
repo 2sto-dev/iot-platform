@@ -98,16 +98,23 @@ Go: schimbi în `getTokenContext()` din `[]byte(secret)` în `parsePublicKey()`.
 
 ---
 
-## 🟠 5. Service tokens (`is_service: true`)
+## ✅ 5. Service tokens (`is_service: true`) — REZOLVAT
 
-**Risc:** Token cu `is_service: true` sare peste Membership check și are
-acces cross-tenant. Refresh token în localStorage = vulnerabil la XSS.
+**Status:** rezolvat în `agent/security-jwt-no-service-flag`.
 
-**Fix:**
+Claim-ul `is_service` nu mai trăiește în JWT — middleware-ul îl derivă
+server-side din `user.is_superuser` la fiecare request, cu cache TTL 60s
+și invalidare prin signal pe save User.
+
+Beneficii:
+- XSS care exfiltrează JWT-ul din localStorage primește doar identitatea
+  user-ului, NU bit-ul de admin. Tokenul forjat cu `is_service: true` în
+  payload e ignorat (test `test_forging_is_service_claim_does_not_grant_privilege`).
+- Demote admin în UI → cache invalidat instant → request-ul următor 403.
+
+**Hardening rămas pentru sesiuni browser în general:**
 - Reduce TTL: access 15 min (în loc de 1h), refresh 1 zi (în loc de 7).
 - Refresh tokens în HttpOnly + SameSite=Strict cookie, nu localStorage.
-- Service tokens doar pentru CLI / CI, NU pentru sesiuni de browser.
-- IP allowlist pe rutele Kong unde `is_service` e acceptat.
 
 ---
 
@@ -189,10 +196,11 @@ curl -sk -H "Authorization: Bearer $TOKEN" https://prod.example.com/go/runtime
 |------|--------|--------|
 | MQTT password obligatoriu | ✅ done | agent/security-mqtt-password-required |
 | Force rotate management cmd | ✅ done | agent/security-mqtt-password-required |
+| `is_service` scos din JWT | ✅ done | agent/security-jwt-no-service-flag |
 | TLS termination | ⏳ deploy | — |
 | Go bind 127.0.0.1 | ⏳ deploy | — |
 | Rate limiting | ⏳ deploy | — |
 | RS256 migration | ⏳ pre-prod | — |
-| Service token TTL | ⏳ pre-prod | — |
+| Access/refresh TTL hardening | ⏳ pre-prod | — |
 | Secrets manager | ⏳ deploy | — |
 | Activation IP binding | ⏳ pre-prod | — |

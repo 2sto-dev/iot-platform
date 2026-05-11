@@ -30,12 +30,13 @@ func RegisterRoutes(mux *http.ServeMux, rt *runtime.RuntimeManager) {
 }
 
 // Claims-urile relevante extrase din JWT după validarea făcută de Kong.
+// `is_service` nu mai trăiește în JWT — Django middleware derivă privilegiul
+// server-side din user.is_superuser (vezi tenants/middleware.py).
 type tokenContext struct {
 	Username   string
 	TenantID   int64
 	TenantSlug string
 	Role       string
-	IsService  bool
 }
 
 func getTokenContext(r *http.Request) (tokenContext, error) {
@@ -67,9 +68,6 @@ func getTokenContext(r *http.Request) (tokenContext, error) {
 	}
 	if s, ok := claims["role"].(string); ok {
 		ctx.Role = s
-	}
-	if b, ok := claims["is_service"].(bool); ok {
-		ctx.IsService = b
 	}
 	if ctx.TenantID == 0 {
 		return tokenContext{}, fmt.Errorf("tenant_id missing in token")
