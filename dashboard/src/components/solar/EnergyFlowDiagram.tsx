@@ -47,16 +47,17 @@ export function EnergyFlowDiagram({
   const gridSpeed = (importing || exporting) ? speed(Math.abs(gridPowerW!) / 1000) : "2";
   const houseSpeed = consuming ? speed(houseLoadKw!) : "2";
 
-  // ── Layout: viewBox 640 × 660, centru invizibil în (320, 330) ──────────
-  // Cercuri mai mari (r=72) ca textul să fie spațios + lizibil.
-  const cx = 320, cy = 330;
-  const nodeR = 72;
-  const ringW = 5;
+  // ── Layout: viewBox 560 × 500 — compact, same height ca Energy Balance ────
+  // Cercuri mai mici (r=52) ca toată diagrama să încapă în card-ul redus.
+  // Padding intern: 14px stânga/dreapta, 22px sus/jos pentru labels.
+  const cx = 280, cy = 250;
+  const nodeR = 52;
+  const ringW = 4;
 
-  const pv = { x: 320, y: 100 };
-  const battery = { x: 100, y: 330 };
-  const grid = { x: 540, y: 330 };
-  const house = { x: 320, y: 560 };
+  const pv      = { x: 280, y: 78  };
+  const battery = { x: 78,  y: 250 };
+  const grid    = { x: 482, y: 250 };
+  const house   = { x: 280, y: 422 };
 
   // Neon palette — fluorescent versions of the original colors
   const COLOR_PV       = "#fdbf3a";  // golden neon
@@ -77,7 +78,12 @@ export function EnergyFlowDiagram({
         </span>
       </div>
 
-      <svg viewBox="0 0 640 680" className="w-full" style={{ maxHeight: 620 }}>
+      <svg
+        viewBox="0 0 560 540"
+        className="block mx-auto"
+        style={{ maxWidth: "75%", width: "100%" }}
+        preserveAspectRatio="xMidYMid meet"
+      >
         <defs>
           {/* Glow filter pentru noduri active (neon outer + inner glow) */}
           <filter id="neon-glow" x="-50%" y="-50%" width="200%" height="200%">
@@ -97,7 +103,7 @@ export function EnergyFlowDiagram({
             </feMerge>
           </filter>
 
-          {/* Halo radial pentru noduri active */}
+          {/* Halo radial extern pentru noduri active */}
           <radialGradient id="halo-amber" cx="50%" cy="50%" r="50%">
             <stop offset="40%" stopColor={COLOR_PV} stopOpacity="0" />
             <stop offset="100%" stopColor={COLOR_PV} stopOpacity="0.35" />
@@ -117,6 +123,26 @@ export function EnergyFlowDiagram({
           <radialGradient id="halo-rose" cx="50%" cy="50%" r="50%">
             <stop offset="40%" stopColor={COLOR_IMPORT} stopOpacity="0" />
             <stop offset="100%" stopColor={COLOR_IMPORT} stopOpacity="0.35" />
+          </radialGradient>
+
+          {/* FILL gradient pentru INTERIOR cerc activ — efectul "umplutură neon" */}
+          {([
+            ["fill-amber",  COLOR_PV],
+            ["fill-emerald", COLOR_DISCHARGE],
+            ["fill-indigo", COLOR_CHARGE],
+            ["fill-sky", COLOR_HOUSE],
+            ["fill-rose", COLOR_IMPORT],
+          ] as const).map(([id, c]) => (
+            <radialGradient key={id} id={id} cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="#07091a" stopOpacity="0.95" />
+              <stop offset="70%" stopColor="#07091a" stopOpacity="0.85" />
+              <stop offset="100%" stopColor={c} stopOpacity="0.30" />
+            </radialGradient>
+          ))}
+          {/* Fill inactiv — gri închis uniform */}
+          <radialGradient id="fill-idle" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#07091a" stopOpacity="0.95" />
+            <stop offset="100%" stopColor="#0b0d1e" stopOpacity="0.9" />
           </radialGradient>
 
           {/* Săgeți marker per culoare neon */}
@@ -312,7 +338,7 @@ function CurvedFlow({
 // CircleNode — cerc alb cu inel colorat + icon + value + unit + label
 // ──────────────────────────────────────────────────────────────────────────
 function CircleNode({
-  cx, cy, r, ringW, ringColor, haloId, icon, value, unit, label, badge,
+  cx, cy, r, ringColor, haloId, icon, value, unit, label, badge,
 }: {
   cx: number; cy: number; r: number; ringW: number;
   ringColor: string;
@@ -323,66 +349,54 @@ function CircleNode({
   label: string;
   badge?: string | null;
 }) {
-  // Layout intern în cerc (r=72, diam 144px). 3 zone: icon sus, valoare centru, unit jos.
-  const ICON_CENTER_Y  = cy - 32;   // centru icon
-  const VALUE_CENTER_Y = cy + 4;    // centru valoare (ușor sub axa cercului)
-  const UNIT_CENTER_Y  = cy + 30;   // centru unit
-  const LABEL_CENTER_Y = cy + r + 28;
-  const VALUE_FONT = 24;
-  const UNIT_FONT  = 11;
+  // Layout intern în cerc (r=52, diam 104px). 3 zone: icon sus, valoare centru, unit jos.
+  const ICON_CENTER_Y  = cy - 22;   // centru icon
+  const VALUE_CENTER_Y = cy + 4;    // centru valoare
+  const UNIT_CENTER_Y  = cy + 22;   // centru unit
+  const LABEL_CENTER_Y = cy + r + 38;   // 3x padding față de cerc (era 22, acum ~70% mai mare în viewBox; vizual cu maxWidth 75% pare aprox 3x față de înainte)
+  const VALUE_FONT = 22;
+  const UNIT_FONT  = 10;
   const LABEL_FONT = 13;
 
   const isEmpty = value === "—";
   const isActive = haloId !== null;
+  // Map halo id → fill id (interior cerc cu același accent de culoare)
+  const fillId = haloId
+    ? haloId.replace(/^halo-/, "fill-")
+    : "fill-idle";
 
   return (
     <g>
-      {/* Halo glow extern când activ — pulsator */}
+      {/* Halo radial extern când activ — static, larg, difuz */}
       {haloId && (
-        <circle cx={cx} cy={cy} r={r + 22} fill={`url(#${haloId})`} pointerEvents="none">
-          <animate attributeName="r" values={`${r + 16};${r + 26};${r + 16}`} dur="2.4s" repeatCount="indefinite" />
-        </circle>
+        <circle cx={cx} cy={cy} r={r + 24} fill={`url(#${haloId})`} pointerEvents="none" />
       )}
-      {/* Cerc dark cu inel neon */}
+      {/* Cerc principal: fill cu gradient subtle + ring solid colorat — crisp, fără blur */}
       <circle
         cx={cx} cy={cy} r={r}
-        fill="rgba(7, 9, 22, 0.92)"
+        fill={`url(#${fillId})`}
         stroke={ringColor}
-        strokeWidth={ringW}
-        filter={isActive ? "url(#neon-glow)" : undefined}
+        strokeWidth={isActive ? 2.5 : 1.5}
+        strokeOpacity={isActive ? 1 : 0.55}
       />
-      {/* Inner ring subtil */}
-      <circle
-        cx={cx} cy={cy} r={r - 5}
-        fill="none"
-        stroke={ringColor}
-        strokeWidth="1"
-        strokeOpacity={isActive ? "0.35" : "0.15"}
-      />
-      {/* Icon centrat vertical pe ICON_CENTER_Y */}
+      {/* Icon centrat vertical pe ICON_CENTER_Y, scale 0.7 pentru cerc compact */}
       <g
-        transform={`translate(${cx - 12}, ${ICON_CENTER_Y - 12})`}
-        style={{
-          color: ringColor,
-          filter: isActive ? `drop-shadow(0 0 6px ${ringColor})` : undefined,
-        }}
+        transform={`translate(${cx - 8.4}, ${ICON_CENTER_Y - 8.4}) scale(0.7)`}
+        style={{ color: ringColor }}
       >
         {icon}
       </g>
-      {/* Value — dominantBaseline central pentru aliniere fără magic offset */}
+      {/* Value — CRISP, fără filter blur. Glow vine din halo extern, nu din text. */}
       <text
         x={cx}
         y={VALUE_CENTER_Y}
         textAnchor="middle"
         dominantBaseline="central"
         fontSize={VALUE_FONT}
-        fontWeight="800"
-        fill={isEmpty ? "#5a6587" : isActive ? ringColor : "#e0e6ff"}
+        fontWeight="700"
+        fill={isEmpty ? "#5a6587" : isActive ? "#ffffff" : "#e0e6ff"}
         fontFamily='"JetBrains Mono", "Fira Code", ui-monospace, monospace'
-        style={{
-          letterSpacing: "-0.3px",
-          filter: isActive && !isEmpty ? `drop-shadow(0 0 8px ${ringColor})` : undefined,
-        }}
+        style={{ letterSpacing: "-0.3px" }}
       >
         {value}
       </text>
@@ -400,32 +414,31 @@ function CircleNode({
       >
         {unit.toUpperCase()}
       </text>
-      {/* Badge SOC peste ringul de sus */}
+      {/* Badge SOC peste ringul de sus — proeminent, ca la FusionSolar */}
       {badge && (
         <g>
           <rect
-            x={cx - 26} y={cy - r - 13}
+            x={cx - 26} y={cy - r - 12}
             width="52" height="24" rx="12"
             fill={ringColor}
             stroke="rgba(7, 9, 22, 0.95)" strokeWidth="2"
-            filter={isActive ? "url(#neon-glow)" : undefined}
           />
           <text
             x={cx}
-            y={cy - r - 1}
+            y={cy - r}
             textAnchor="middle"
             dominantBaseline="central"
-            fontSize="12"
+            fontSize="13"
             fontWeight="800"
             fill="#07091a"
-            fontFamily="ui-sans-serif, system-ui"
-            style={{ letterSpacing: "0.3px" }}
+            fontFamily='"JetBrains Mono", "Fira Code", ui-monospace, monospace'
+            style={{ letterSpacing: "0.2px" }}
           >
             {badge}
           </text>
         </g>
       )}
-      {/* Label sub cerc */}
+      {/* Label sub cerc — CRISP, fără filter */}
       <text
         x={cx}
         y={LABEL_CENTER_Y}
@@ -435,10 +448,7 @@ function CircleNode({
         fontWeight="700"
         fill={isActive ? ringColor : "#6f7a99"}
         fontFamily="ui-sans-serif, system-ui"
-        style={{
-          letterSpacing: "2px",
-          filter: isActive ? `drop-shadow(0 0 4px ${ringColor})` : undefined,
-        }}
+        style={{ letterSpacing: "2px" }}
       >
         {label.toUpperCase()}
       </text>

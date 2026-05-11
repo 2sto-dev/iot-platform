@@ -89,14 +89,16 @@ export default function SolarPage() {
   }
 
   return (
-    <div className="solar-neon max-w-[1400px]">
+    <div className="solar-neon">
+    <div className="max-w-[1400px] mx-auto">
       {/* ──── Page header ─────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-end justify-between gap-4 mb-6 pb-4">
         <div>
           <h1
-            className="text-3xl font-bold tracking-tight neon-glow-text"
+            className="text-3xl font-bold tracking-tight neon-glow-text flex items-center gap-3"
             style={{ color: "#fdbf3a", textShadow: "0 0 12px rgba(253, 191, 58, 0.6), 0 0 28px rgba(253, 191, 58, 0.35)" }}
           >
+            <SunIcon />
             SOLAR
           </h1>
           <p className="text-sm mt-2 flex items-center gap-2 text-gray-500">
@@ -144,8 +146,8 @@ export default function SolarPage() {
         title="Real-time energy flow"
         subtitle="Animated FusionSolar-style diagram + production / consumption gauges"
       />
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <div className="lg:col-span-2 solar-neon-card-in" style={{ animationDelay: "0.05s" }}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <div className="solar-neon-card-in" style={{ animationDelay: "0.05s" }}>
           <EnergyFlowDiagram
             pvPowerKw={pvPower}
             gridPowerW={gridPower}
@@ -212,6 +214,7 @@ export default function SolarPage() {
         <span>·</span>
         <span style={{ color: "#3a4060" }}>Drag cards within sections to reorder</span>
       </div>
+    </div>
     </div>
   );
 }
@@ -478,6 +481,35 @@ function TemperatureCard({
         </div>
       )}
     </div>
+  );
+}
+
+function SunIcon() {
+  return (
+    <svg
+      width="36"
+      height="36"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#fdbf3a"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{
+        filter: "drop-shadow(0 0 8px rgba(253, 191, 58, 0.7)) drop-shadow(0 0 16px rgba(253, 191, 58, 0.4))",
+        animation: "neon-sun-spin 18s linear infinite",
+      }}
+    >
+      <circle cx="12" cy="12" r="4.5" fill="#fdbf3a" fillOpacity="0.25" />
+      <line x1="12" y1="2" x2="12" y2="4.5" />
+      <line x1="12" y1="19.5" x2="12" y2="22" />
+      <line x1="2" y1="12" x2="4.5" y2="12" />
+      <line x1="19.5" y1="12" x2="22" y2="12" />
+      <line x1="4.93" y1="4.93" x2="6.7" y2="6.7" />
+      <line x1="17.3" y1="17.3" x2="19.07" y2="19.07" />
+      <line x1="4.93" y1="19.07" x2="6.7" y2="17.3" />
+      <line x1="17.3" y1="6.7" x2="19.07" y2="4.93" />
+    </svg>
   );
 }
 

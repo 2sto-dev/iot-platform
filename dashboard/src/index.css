@@ -41,6 +41,17 @@
   0%   { transform: translateY(20px); opacity: 0; }
   100% { transform: translateY(0);     opacity: 1; }
 }
+@keyframes neon-sun-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* Când Solar e activă, main-ul din Layout pierde padding-ul + background-ul gri ca
+   să fie full-bleed cu fundalul neon. */
+main:has(.solar-neon) {
+  padding: 0 !important;
+  background: transparent !important;
+}
 
 .solar-neon {
   background:
@@ -50,10 +61,9 @@
   background-size: 200% 200%, 200% 200%, 100% 100%;
   animation: neon-bg-pulse 18s ease-in-out infinite;
   min-height: 100vh;
-  padding: 1.5rem;
-  border-radius: 1rem;
+  padding: 2rem;
   position: relative;
-  overflow: hidden;
+  overflow-x: hidden;
 }
 
 /* Grid subtil fix pe deasupra background-ului — efect "matrix" */
