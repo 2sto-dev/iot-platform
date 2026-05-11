@@ -14,7 +14,7 @@ jwt_secrets:
     secret: "{vault://env/kong-jwt-secret}"  # citit din env var KONG_JWT_SECRET (Kong env vault); trebuie să fie identic cu JWT_SECRET din Django
 
 services:
-  # Django API - autentificare (login / refresh) → fără JWT
+  # ── Auth (fără JWT) ──────────────────────────────────────────────────────────
   - name: django-auth
     url: http://172.16.0.105:8000
     routes:
@@ -27,7 +27,20 @@ services:
           - /api/token/refresh
         strip_path: false
 
-  # Django API - device-uri (JWT validat de Kong + propagare X-Tenant-* upstream)
+  # ── Pre-login + provisioning (AllowAny) ──────────────────────────────────────
+  - name: django-public
+    url: http://172.16.0.105:8000
+    routes:
+      - name: django-auth-tenants
+        paths:
+          - /api/auth/tenants
+        strip_path: false
+      - name: django-provisioning
+        paths:
+          - /api/provisioning
+        strip_path: false
+
+  # ── Devices ──────────────────────────────────────────────────────────────────
   - name: django-devices
     url: http://172.16.0.105:8000
     routes:
@@ -41,63 +54,112 @@ services:
               key_claim_name: iss
               claims_to_verify:
                 - exp
-          # După validarea JWT, decodează payload-ul (signature-checked deja) și propagă claim-urile
-          # ca headere către upstream — Django/Go nu mai re-decodează tokenul.
-          - name: pre-function
-            config:
-              access:
-                - |
-                  local cjson = require "cjson.safe"
-                  local auth = kong.request.get_header("authorization")
-                  if not auth or auth:sub(1, 7) ~= "Bearer " then return end
-                  local token = auth:sub(8)
-                  local _, payload = token:match("([^%.]+)%.([^%.]+)%.")
-                  if not payload then return end
-                  payload = payload:gsub("-", "+"):gsub("_", "/")
-                  payload = payload .. string.rep("=", (4 - #payload % 4) % 4)
-                  local decoded = ngx.decode_base64(payload)
-                  if not decoded then return end
-                  local claims = cjson.decode(decoded)
-                  if not claims then return end
-                  if claims.tenant_id   then kong.service.request.set_header("X-Tenant-Id",   tostring(claims.tenant_id))   end
-                  if claims.tenant_slug then kong.service.request.set_header("X-Tenant-Slug", tostring(claims.tenant_slug)) end
-                  if claims.role        then kong.service.request.set_header("X-Role",        tostring(claims.role))        end
-                  if claims.username    then kong.service.request.set_header("X-Username",    tostring(claims.username))    end
-          - name: file-log
-            config:
-              path: /var/log/kong/django-device.log
 
-  # Go API (JWT validat de Kong + propagare X-Tenant-* upstream)
-  - name: go-api
-    url: http://172.16.0.105:8080
+  # ── Rules ────────────────────────────────────────────────────────────────────
+  - name: django-rules
+    url: http://172.16.0.105:8000
     routes:
-      - name: go-api-route
+      - name: django-rules-route
         paths:
-          - /go
-        strip_path: false   # 👉 foarte important: taie prefixul /go
+          - /api/v1/rules
+        strip_path: false
         plugins:
           - name: jwt
             config:
               key_claim_name: iss
               claims_to_verify:
                 - exp
-          - name: pre-function
+
+  # ── Notifications ─────────────────────────────────────────────────────────────
+  - name: django-notifications
+    url: http://172.16.0.105:8000
+    routes:
+      - name: django-notifications-route
+        paths:
+          - /api/v1/notifications
+        strip_path: false
+        plugins:
+          - name: jwt
             config:
-              access:
-                - |
-                  local cjson = require "cjson.safe"
-                  local auth = kong.request.get_header("authorization")
-                  if not auth or auth:sub(1, 7) ~= "Bearer " then return end
-                  local token = auth:sub(8)
-                  local _, payload = token:match("([^%.]+)%.([^%.]+)%.")
-                  if not payload then return end
-                  payload = payload:gsub("-", "+"):gsub("_", "/")
-                  payload = payload .. string.rep("=", (4 - #payload % 4) % 4)
-                  local decoded = ngx.decode_base64(payload)
-                  if not decoded then return end
-                  local claims = cjson.decode(decoded)
-                  if not claims then return end
-                  if claims.tenant_id   then kong.service.request.set_header("X-Tenant-Id",   tostring(claims.tenant_id))   end
-                  if claims.tenant_slug then kong.service.request.set_header("X-Tenant-Slug", tostring(claims.tenant_slug)) end
-                  if claims.role        then kong.service.request.set_header("X-Role",        tostring(claims.role))        end
-                  if claims.username    then kong.service.request.set_header("X-Username",    tostring(claims.username))    end
+              key_claim_name: iss
+              claims_to_verify:
+                - exp
+
+  # ── Audit log ─────────────────────────────────────────────────────────────────
+  - name: django-audit
+    url: http://172.16.0.105:8000
+    routes:
+      - name: django-audit-route
+        paths:
+          - /api/v1/audit
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              claims_to_verify:
+                - exp
+
+  # ── API Keys ──────────────────────────────────────────────────────────────────
+  - name: django-api-keys
+    url: http://172.16.0.105:8000
+    routes:
+      - name: django-api-keys-route
+        paths:
+          - /api/v1/api-keys
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              claims_to_verify:
+                - exp
+
+  # ── OTA ───────────────────────────────────────────────────────────────────────
+  - name: django-ota
+    url: http://172.16.0.105:8000
+    routes:
+      - name: django-ota-route
+        paths:
+          - /api/ota
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              claims_to_verify:
+                - exp
+
+  # ── OpenAPI docs (fără auth) ───────────────────────────────────────────────────
+  - name: django-docs
+    url: http://172.16.0.105:8000
+    routes:
+      - name: django-schema
+        paths:
+          - /api/schema
+        strip_path: false
+      - name: django-swagger
+        paths:
+          - /api/docs
+        strip_path: false
+      - name: django-redoc
+        paths:
+          - /api/redoc
+        strip_path: false
+
+  # ── Go API (JWT validat de Kong; Go re-decodează pentru tenant_id) ──────────
+  # strip_path: true => upstream primește /runtime, /metrics/... (Go mux nu are prefix /go)
+  # Authorization header e propagat by default => Go-ul re-validează JWT cu același secret.
+  - name: go-api
+    url: http://172.16.0.105:8090
+    routes:
+      - name: go-api-route
+        paths:
+          - /go
+        strip_path: true
+        plugins:
+          - name: jwt
+            config:
+              key_claim_name: iss
+              claims_to_verify:
+                - exp
